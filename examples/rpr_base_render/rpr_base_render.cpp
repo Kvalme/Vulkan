@@ -124,6 +124,11 @@ public:
         rotation = { 0.0f, 15.0f, 0.0f };
         title = "Texture loading";
         settings.overlay = true;
+        enabledDeviceExtensions.push_back(VK_EXT_SHADER_SUBGROUP_BALLOT_EXTENSION_NAME);
+        enabledDeviceExtensions.push_back(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME);
+        enabledDeviceExtensions.push_back(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
+        enabledDeviceExtensions.push_back(VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME);
+
     }
 
     ~VulkanExample()
@@ -468,6 +473,8 @@ public:
         //Get semaphores from color aov
         CHECK_RPR(rprContextGetInfo(context_, RPR_CONTEXT_FRAMEBUFFERS_READY_SEMAPHORES,
              sizeof(VkSemaphore) * frames_in_flight_, framebuffer_ready_semaphores_.data(), nullptr));
+
+        CHECK_RPR(rprContextSetAOV(context_, RPR_AOV_COLOR, color_framebuffer_));
     }
 
     void initScene()
@@ -579,6 +586,9 @@ public:
     {
         if (!prepared)
             return;
+
+        CHECK_RPR(rprContextRender(context_));
+
         draw();
     }
 

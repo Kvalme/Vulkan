@@ -1,0 +1,3 @@
+glslangvalidator -V fullscreen_quad.vert -o fullscreen_quad.vert.spv
+glslangvalidator -V output.frag -o output.frag.spv
+

@@ -506,7 +506,7 @@ public:
     void loadTextureFromRprFb()
     {
         //get VkImage from FB
-        VkImage = getRenderedImage();
+        VkImage image = getRenderedImage();
 
         // Create a texture sampler
         // In Vulkan textures are accessed by samplers
@@ -537,7 +537,7 @@ public:
         // information and sub resource ranges
         VkImageViewCreateInfo view = vks::initializers::imageViewCreateInfo();
         view.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view.format = format;
+        view.format = VK_FORMAT_R16G16B16A16_UNORM;
         view.components = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
         // The subresource range describes the set of mip levels (and array layers) that can be accessed through this image view
         // It's possible to create multiple image views for a single image referring to different (and/or overlapping) ranges of the image
@@ -547,10 +547,13 @@ public:
         view.subresourceRange.layerCount = 1;
         // Linear tiling usually won't support mip maps
         // Only set mip map count if optimal tiling is used
-        view.subresourceRange.levelCount = (useStaging) ? texture.mipLevels : 1;
+        view.subresourceRange.levelCount = 1;
         // The view will be based on the texture's image
-        view.image = texture.image;
+        view.image = image;
         VK_CHECK_RESULT(vkCreateImageView(device, &view, nullptr, &texture.view));
+
+        texture.image = image;
+
     }
     void prepare()
     {

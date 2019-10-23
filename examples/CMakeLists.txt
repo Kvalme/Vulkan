@@ -24,10 +24,16 @@ function(buildExample EXAMPLE_NAME)
 	if(WIN32)
 		add_executable(${EXAMPLE_NAME} WIN32 ${MAIN_CPP} ${SOURCE} ${SHADERS})
 		target_link_libraries(${EXAMPLE_NAME} base ${Vulkan_LIBRARY} ${ASSIMP_LIBRARIES} ${WINLIBS})
-	else(WIN32)
+        target_link_directories(${EXAMPLE_NAME} PUBLIC ${CMAKE_SOURCE_DIR}/libs/Rpr)
+        target_link_libraries(${EXAMPLE_NAME} RadeonProRender64 RadeonProRenderIO)
+    else(WIN32)
 		add_executable(${EXAMPLE_NAME} ${MAIN_CPP} ${SOURCE} ${SHADERS})
 		target_link_libraries(${EXAMPLE_NAME} base )
-	endif(WIN32)
+        target_link_directories(${EXAMPLE_NAME} PUBLIC ${CMAKE_SOURCE_DIR}/libs/Rpr)
+        target_link_libraries(${EXAMPLE_NAME} RadeonProRender64 RadeonProRenderIO)
+    endif(WIN32)
+
+    target_include_directories(${EXAMPLE_NAME} PUBLIC ${CMAKE_SOURCE_DIR}/external)
 
 	set_target_properties(${EXAMPLE_NAME} PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 
@@ -44,76 +50,8 @@ function(buildExamples)
 endfunction(buildExamples)
 
 set(EXAMPLES
-	bloom
-	computecloth
-	computecullandlod
-	computeheadless
-	computenbody
-	computeparticles
-	computeraytracing
-	computeshader
-	conditionalrender
-	conservativeraster
-	debugmarker
-	deferred
-	deferredmultisampling
-	deferredshadows
-	descriptorsets
-	displacement
-	distancefieldfonts
-	dynamicuniformbuffer
-	gears
-	geometryshader
-	hdr
-	imgui
-	indirectdraw
-	inlineuniformblocks
-	inputattachments
-	instancing
-	mesh
-	multisampling
-	multithreading
-	multiview
-	negativeviewportheight
-	nv_ray_tracing_basic
-	nv_ray_tracing_shadows
-	nv_ray_tracing_reflections
-	occlusionquery
-	offscreen
-	parallaxmapping
-	particlefire
-	pbrbasic
-	pbribl
-	pbrtexture
-	pipelines
-	pipelinestatistics
-	pushconstants
-	pushdescriptors
-	radialblur
-	renderheadless
-	scenerendering
-	screenshot
-	shadowmapping
-	shadowmappingomni
-	shadowmappingcascade
-	skeletalanimation
-	specializationconstants
-	sphericalenvmapping
-	ssao
-	stencilbuffer
-	subpasses
-	terraintessellation
-	tessellation
-	textoverlay
-	texture
-	texture3d
-	texturearray
-	texturecubemap
-	texturemipmapgen
-	texturesparseresidency
-	triangle
-	viewportarray
-	vulkanscene
+    rpr_base_render
+    texture
 )
 
 buildExamples()

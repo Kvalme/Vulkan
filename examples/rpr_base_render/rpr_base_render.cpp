@@ -127,7 +127,7 @@ public:
     {
         zoom = -2.5f;
         rotation = { 0.0f, 15.0f, 0.0f };
-        title = "Texture loading";
+        title = "RPR basic render";
         settings.overlay = true;
         enabledDeviceExtensions.push_back(VK_EXT_SHADER_SUBGROUP_BALLOT_EXTENSION_NAME);
         enabledDeviceExtensions.push_back(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME);
@@ -697,6 +697,7 @@ public:
             camFront.x, camFront.y, camFront.z,
             0.0f, 1.0f, 0.0f));
 
+        CHECK_RPR(rprFrameBufferClear(color_framebuffer_));
     }
 
     void updateQuality()

@@ -51,7 +51,7 @@ endfunction(buildExamples)
 
 set(EXAMPLES
     rpr_base_render
-    texture
+    rpr_edit
 )
 
 buildExamples()

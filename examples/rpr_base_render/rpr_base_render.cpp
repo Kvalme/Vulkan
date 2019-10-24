@@ -99,7 +99,6 @@ public:
 
     //Interop
     constexpr static std::uint32_t frames_in_flight_ = 3;
-    //Default values for RPR. Can be omited
     std::uint32_t acc_size_ = 2 * 1024u * 1024u;
     std::uint32_t vbuf_size_ = 1 * 1024u * 1024u;
     std::uint32_t ibuf_size_ = 1 * 1024u * 1024u;
@@ -490,6 +489,7 @@ public:
         VK_CHECK_RESULT(vkEndCommandBuffer(fake_cmd_buffer));
 
         VkSubmitInfo info;
+        memset(&info, 0, sizeof(VkSubmitInfo));
         info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         info.pSignalSemaphores = framebuffer_release_semaphores_.data();
         info.signalSemaphoreCount = framebuffer_release_semaphores_.size();
@@ -497,6 +497,7 @@ public:
         info.waitSemaphoreCount = 0;
         info.pCommandBuffers = &fake_cmd_buffer;
         info.commandBufferCount = 1;
+
 
         VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &info, VK_NULL_HANDLE));
         VK_CHECK_RESULT(vkQueueWaitIdle(queue));
@@ -650,11 +651,6 @@ public:
         initRpr();
         initAovs();
         initScene();
-
-        CHECK_RPR(rprContextRender(context_));
-
-        vkDeviceWaitIdle(device);
-
 
         loadTextureFromRprFb();
 

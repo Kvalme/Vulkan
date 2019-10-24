@@ -116,7 +116,6 @@ public:
         enabledDeviceExtensions.push_back(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
         enabledDeviceExtensions.push_back(VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME);
         enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
-        enabledDeviceExtensions.push_back("VK_AMD_shader_ballot");
 
         enabledFeatures.shaderInt64 = VK_TRUE;
         enabledFeatures.vertexPipelineStoresAndAtomics = VK_TRUE;

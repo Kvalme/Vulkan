@@ -135,7 +135,6 @@ public:
         enabledDeviceExtensions.push_back(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
         enabledDeviceExtensions.push_back(VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME);
         enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
-        enabledDeviceExtensions.push_back("VK_AMD_shader_ballot");
 
         enabledFeatures.shaderInt64 = VK_TRUE;
         enabledFeatures.vertexPipelineStoresAndAtomics = VK_TRUE;
@@ -691,7 +690,8 @@ public:
 
     void updateMesh()
     {
-        static float z_delta = 0.f;
+        static float z_delta = 0.5f;
+        static float zdd = 0.01f;
         float x_step = 1.f / (float)x_size;
         float y_step = 1.f / (float)y_size;
 
@@ -700,7 +700,7 @@ public:
         {
             for (std::size_t x = 0; x < x_size; ++x)
             {
-                float z = z_delta * sin(x_step * x * y_step * y );
+                float z = 3.f * sin(x_step * x * y_step * y * z_delta);
                 vertices_data[y * x_size + x].position = glm::vec4(x_step * x, z, y_step * y, 1.0f);
                 vertices_data[y * x_size + x].normal = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
                 vertices_data[y * x_size + x].uv0 = glm::vec2(x_step * x, y_step * y);
@@ -708,8 +708,9 @@ public:
             }
         }
 
-        z_delta += 0.1;
-        if (z_delta > 3) z_delta = 0.f;
+        if (z_delta > 10) zdd = -zdd;
+        else if (z_delta < 0.01) zdd = -zdd;
+        z_delta += zdd;
 
         DataChange vertex_changes;
         vertex_changes.stride = sizeof(Vertex);

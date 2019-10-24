@@ -47,14 +47,6 @@
     }\
 }
 
-
-// Vertex layout for this example
-struct Vertex {
-    float pos[3];
-    float uv[2];
-    float normal[3];
-};
-
 class VulkanExample : public VulkanExampleBase
 {
 public:
@@ -79,15 +71,6 @@ public:
     vks::Buffer vertexBuffer;
     vks::Buffer indexBuffer;
     uint32_t indexCount;
-
-    vks::Buffer uniformBufferVS;
-
-    struct {
-        glm::mat4 projection;
-        glm::mat4 model;
-        glm::vec4 viewPos;
-        float lodBias = 0.0f;
-    } uboVS;
 
     struct {
         VkPipeline solid;
@@ -166,7 +149,6 @@ public:
 
         vertexBuffer.destroy();
         indexBuffer.destroy();
-        uniformBufferVS.destroy();
     }
 
     // Enable physical device features required for this example
@@ -427,38 +409,6 @@ public:
         VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.solid));
     }
 
-    // Prepare and initialize uniform buffer containing shader uniforms
-    void prepareUniformBuffers()
-    {
-        // Vertex shader uniform buffer block
-        VK_CHECK_RESULT(vulkanDevice->createBuffer(
-            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            &uniformBufferVS,
-            sizeof(uboVS),
-            &uboVS));
-
-        updateUniformBuffers();
-    }
-
-    void updateUniformBuffers()
-    {
-        // Vertex shader
-        uboVS.projection = glm::perspective(glm::radians(60.0f), (float)width / (float)height, 0.001f, 256.0f);
-        glm::mat4 viewMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, zoom));
-
-        uboVS.model = viewMatrix * glm::translate(glm::mat4(1.0f), cameraPos);
-        uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-        uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-        uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
-
-        uboVS.viewPos = glm::vec4(0.0f, 0.0f, -zoom, 0.0f);
-
-        VK_CHECK_RESULT(uniformBufferVS.map());
-        memcpy(uniformBufferVS.mapped, &uboVS, sizeof(uboVS));
-        uniformBufferVS.unmap();
-    }
-
     void initRpr()
     {
         //Register plugin
@@ -655,7 +605,6 @@ public:
         loadTextureFromRprFb();
 
         setupVertexDescriptions();
-        prepareUniformBuffers();
         setupDescriptorSetLayout();
         preparePipelines();
         setupDescriptorPool();

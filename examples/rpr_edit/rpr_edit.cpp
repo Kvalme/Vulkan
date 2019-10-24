@@ -94,8 +94,8 @@ public:
     std::size_t x_size = 64;
     std::size_t y_size = 64;
 
-    std::vector<Vertex> vertices;
-    std::vector<std::uint32_t> index;
+    std::vector<Vertex> vertices_data;
+    std::vector<std::int32_t> index_data;
 
     //Interop
     constexpr static std::uint32_t frames_in_flight_ = 3;
@@ -115,6 +115,7 @@ public:
     rpr_scene scene_;
     rpr_framebuffer color_framebuffer_;
     rpr_camera camera_;
+    rpr_shape mesh_;
     std::uint32_t semaphore_index_;
 
     std::int32_t quality = 0;
@@ -427,38 +428,6 @@ public:
         VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.solid));
     }
 
-    // Prepare and initialize uniform buffer containing shader uniforms
-    void prepareUniformBuffers()
-    {
-        // Vertex shader uniform buffer block
-        VK_CHECK_RESULT(vulkanDevice->createBuffer(
-            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            &uniformBufferVS,
-            sizeof(uboVS),
-            &uboVS));
-
-        updateUniformBuffers();
-    }
-
-    void updateUniformBuffers()
-    {
-        // Vertex shader
-        uboVS.projection = glm::perspective(glm::radians(60.0f), (float)width / (float)height, 0.001f, 256.0f);
-        glm::mat4 viewMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, zoom));
-
-        uboVS.model = viewMatrix * glm::translate(glm::mat4(1.0f), cameraPos);
-        uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-        uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-        uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
-
-        uboVS.viewPos = glm::vec4(0.0f, 0.0f, -zoom, 0.0f);
-
-        VK_CHECK_RESULT(uniformBufferVS.map());
-        memcpy(uniformBufferVS.mapped, &uboVS, sizeof(uboVS));
-        uniformBufferVS.unmap();
-    }
-
     void initRpr()
     {
         //Register plugin
@@ -542,11 +511,64 @@ public:
 
     void initScene()
     {
+        float x_step = 1.f / (float)x_size;
+        float y_step = 1.f / (float)y_size;
+        vertices_data.resize(x_size * y_size);
         //Made custom scene with plane
+        for (std::size_t y = 0; y < y_size; ++y)
+        {
+            for (std::size_t x = 0; x < x_size; ++x)
+            {
+                float z = sin(x_step * x + y_step * y);
+                vertices_data[y * x_size + x].position = glm::vec4(x_step * x, z, y_step * y, 1.0f);
+                vertices_data[y * x_size + x].normal = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+                vertices_data[y * x_size + x].uv0 = glm::vec2(x_step * x, y_step * y);
+                vertices_data[y * x_size + x].uv1 = glm::vec2(0.0f, 0.0f);
+            }
+        }
 
-        // Load up basic scene
-        CHECK_RPR(rprLoadScene("../data/models/CornellBox/orig.objm", "../data/models/CornellBox/",
-            context_, mat_system_, &scene_));
+        std::int32_t quads_per_line = (x_size - 1);
+        std::int32_t lines = (y_size - 1);
+
+        std::vector<rpr_int> num_face_verts;
+
+        for (std::int32_t y = 0; y < lines; ++y)
+        {
+            for (std::int32_t x = 0; x < quads_per_line; ++x)
+            {
+                //Triangle 1
+                index_data.push_back(x + y * x_size);
+                index_data.push_back(x + 1 + y * x_size);
+                index_data.push_back(x + (y + 1) * x_size);
+
+                //Triangle 2
+                index_data.push_back(x + 1 + y * x_size);
+                index_data.push_back(x + 1 + (y + 1) * x_size);
+                index_data.push_back(x + (y + 1) * x_size);
+
+                num_face_verts.push_back(3);
+                num_face_verts.push_back(3);
+            }
+        }
+
+
+        float *dta = (float*)(vertices_data.data());
+
+
+        CHECK_RPR(rprContextCreateMesh(context_,
+            dta, vertices_data.size(), sizeof(Vertex),
+            dta + 4, vertices_data.size(), sizeof(Vertex),
+            dta + 8, vertices_data.size(), sizeof(Vertex),
+            index_data.data(), sizeof(std::int32_t),
+            index_data.data(), sizeof(std::int32_t),
+            index_data.data(), sizeof(std::int32_t),
+            num_face_verts.data(), num_face_verts.size(),
+            &mesh_));
+
+
+        CHECK_RPR(rprSceneAttachShape(scene_, mesh_));
+
+
         CHECK_RPR(rprContextSetScene(context_, scene_));
 
         //Init camera
@@ -656,7 +678,6 @@ public:
         loadTextureFromRprFb();
 
         setupVertexDescriptions();
-        prepareUniformBuffers();
         setupDescriptorSetLayout();
         preparePipelines();
         setupDescriptorPool();

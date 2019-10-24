@@ -118,6 +118,8 @@ public:
     rpr_camera camera_;
     std::uint32_t semaphore_index_;
 
+    std::int32_t quality = 0;
+
     VkPhysicalDeviceDescriptorIndexingFeaturesEXT desc_indexing;
 
 
@@ -513,6 +515,8 @@ public:
             RPR_CREATION_FLAGS_ENABLE_GPU0 | RPR_CREATION_FLAGS_ENABLE_VK_INTEROP,
             properties, "cache", &context_));
 
+        CHECK_RPR(rprContextSetParameterByKey1u(context_, RPR_CONTEXT_Y_FLIP, RPR_TRUE));
+
         //Get extension functions
         CHECK_RPR(rprContextGetFunctionPtr(context_, RPR_CONTEXT_FLUSH_FRAMEBUFFERS_FUNC_NAME, (void**)(&rprContextFlushFrameBuffers)));
 
@@ -547,22 +551,34 @@ public:
         CHECK_RPR(rprContextCreateCamera(context_, &camera_));
         CHECK_RPR(rprCameraSetMode(camera_, RPR_CAMERA_MODE_PERSPECTIVE));
 
+        camera.type = Camera::firstperson;
+
+        camera.setPosition(glm::vec3(-0.2f, 1.3f, 12.6f));
+
         glm::vec3 camFront;
-        camFront.x = -cos(glm::radians(rotation.x)) * sin(glm::radians(rotation.y));
-        camFront.y = sin(glm::radians(rotation.x));
-        camFront.z = cos(glm::radians(rotation.x)) * cos(glm::radians(rotation.y));
+        camFront.x = -cos(glm::radians(camera.rotation.x)) * sin(glm::radians(camera.rotation.y));
+        camFront.y = sin(glm::radians(camera.rotation.x));
+        camFront.z = cos(glm::radians(camera.rotation.x)) * cos(glm::radians(camera.rotation.y));
         camFront = glm::normalize(camFront);
 
-/*        CHECK_RPR(rprCameraLookAt(camera_,
-            cameraPos.x, cameraPos.y, cameraPos.z,
-            camFront.x, camFront.y, camFront.z,
-            0.0f, 1.0f, 0.0f));*/
+        //updateUniformBuffers();
         CHECK_RPR(rprCameraLookAt(camera_,
-            -0.2f, 1.3f, 12.6f,
-            -0.2f, 1.3f, 5.6f,
-            0.f, 1.f, 0.f));
+            camera.position.x, camera.position.y, camera.position.z,
+            camFront.x, camFront.y, camFront.z,
+            0.0f, 1.0f, 0.0f));
+
         CHECK_RPR(rprCameraSetSensorSize(camera_, 36.f, 24.f)); //Standart 36x24 sensor
         CHECK_RPR(rprSceneSetCamera(scene_, camera_));
+
+        rpr_light env_light = nullptr;
+        CHECK_RPR(rprContextCreateEnvironmentLight(context_, &env_light));
+        rpr_image image = nullptr;
+        CHECK_RPR(rprContextCreateImageFromFile(context_, "../data/textures/hdr/studio015.hdr", &image));
+        CHECK_RPR(rprEnvironmentLightSetImage(env_light, image));
+        CHECK_RPR(rprSceneSetEnvironmentLight(scene_, env_light));
+
+        CHECK_RPR(rprContextSetParameterByKey1f(context_, RPR_CONTEXT_DISPLAY_GAMMA, 2.2f));
+
     }
 
     VkImage getRenderedImage()
@@ -669,14 +685,33 @@ public:
 
     virtual void viewChanged()
     {
-        updateUniformBuffers();
+        camera.type = Camera::firstperson;
+        glm::vec3 camFront;
+        camFront.x = -cos(glm::radians(camera.rotation.x)) * sin(glm::radians(camera.rotation.y));
+        camFront.y = sin(glm::radians(camera.rotation.x));
+        camFront.z = cos(glm::radians(camera.rotation.x)) * cos(glm::radians(camera.rotation.y));
+        camFront = glm::normalize(camFront);
+
+        CHECK_RPR(rprCameraLookAt(camera_,
+            camera.position.x, camera.position.y, camera.position.z,
+            camFront.x, camFront.y, camFront.z,
+            0.0f, 1.0f, 0.0f));
+
+    }
+
+    void updateQuality()
+    {
+        CHECK_RPR(rprContextSetParameterByKey1u(context_, RPR_CONTEXT_RENDER_QUALITY, quality));
+        CHECK_RPR(rprFrameBufferClear(color_framebuffer_));
     }
 
     virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)
     {
-        if (overlay->header("Settings")) {
-            if (overlay->sliderFloat("LOD bias", &uboVS.lodBias, 0.0f, (float)texture.mipLevels)) {
-                updateUniformBuffers();
+        if (overlay->header("Settings"))
+        {
+            if (overlay->comboBox("Quality", &quality, {"Low", "Medium", "High"}))
+            {
+                updateQuality();
             }
         }
     }

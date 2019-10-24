@@ -108,6 +108,7 @@ public:
     std::array<VkSemaphore, frames_in_flight_> framebuffer_ready_semaphores_;
 
     rprContextFlushFrameBuffers_func rprContextFlushFrameBuffers;
+    rprMeshUpdate_func rprMeshUpdate;
 
     // RPR
     rpr_context context_;
@@ -488,6 +489,8 @@ public:
 
         //Get extension functions
         CHECK_RPR(rprContextGetFunctionPtr(context_, RPR_CONTEXT_FLUSH_FRAMEBUFFERS_FUNC_NAME, (void**)(&rprContextFlushFrameBuffers)));
+        CHECK_RPR(rprContextGetFunctionPtr(context_, RPR_MESH_UPDATE_FUNC_NAME, (void**)(&rprMeshUpdate)));
+
 
         //Create material system
         CHECK_RPR(rprContextCreateMaterialSystem(context_, 0, &mat_system_));
@@ -686,6 +689,43 @@ public:
         prepared = true;
     }
 
+    void updateMesh()
+    {
+        static float z_delta = 0.f;
+        float x_step = 1.f / (float)x_size;
+        float y_step = 1.f / (float)y_size;
+
+        //Made custom scene with plane
+        for (std::size_t y = 0; y < y_size; ++y)
+        {
+            for (std::size_t x = 0; x < x_size; ++x)
+            {
+                float z = z_delta * sin(x_step * x * y_step * y );
+                vertices_data[y * x_size + x].position = glm::vec4(x_step * x, z, y_step * y, 1.0f);
+                vertices_data[y * x_size + x].normal = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+                vertices_data[y * x_size + x].uv0 = glm::vec2(x_step * x, y_step * y);
+                vertices_data[y * x_size + x].uv1 = glm::vec2(0.0f, 0.0f);
+            }
+        }
+
+        z_delta += 0.1;
+        if (z_delta > 3) z_delta = 0.f;
+
+        DataChange vertex_changes;
+        vertex_changes.stride = sizeof(Vertex);
+        vertex_changes.src_offset = 0;
+        vertex_changes.first_vertex = 0;
+        vertex_changes.vertex_count = x_size * y_size;
+
+        CHECK_RPR(rprMeshUpdate(mesh_, (float*)vertices_data.data(), &vertex_changes, 1, x_size * y_size * sizeof(Vertex),
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0));
+
+        CHECK_RPR(rprFrameBufferClear(color_framebuffer_));
+
+    }
+
     virtual void render()
     {
         if (!prepared)
@@ -699,6 +739,8 @@ public:
             sizeof(semaphore_index_), &semaphore_index_, nullptr));
 
         draw();
+
+        updateMesh();
     }
 
     virtual void viewChanged()

@@ -100,10 +100,10 @@ public:
     //Interop
     constexpr static std::uint32_t frames_in_flight_ = 3;
     //Default values for RPR. Can be omited
-    std::uint32_t acc_size_ = 2048 * 1024u * 1024u;
-    std::uint32_t vbuf_size_ = 1024 * 1024u * 1024u;
-    std::uint32_t ibuf_size_ = 1024 * 1024u * 1024u;
-    std::uint32_t sbuf_size_ = 512 * 1024u * 1024u;
+    std::uint32_t acc_size_ = 2 * 1024u * 1024u;
+    std::uint32_t vbuf_size_ = 1 * 1024u * 1024u;
+    std::uint32_t ibuf_size_ = 1 * 1024u * 1024u;
+    std::uint32_t sbuf_size_ = 5 * 1024u * 1024u;
 
     std::array<VkSemaphore, frames_in_flight_> framebuffer_release_semaphores_;
     std::array<VkSemaphore, frames_in_flight_> framebuffer_ready_semaphores_;
@@ -116,6 +116,9 @@ public:
     rpr_scene scene_;
     rpr_framebuffer color_framebuffer_;
     rpr_camera camera_;
+    std::uint32_t semaphore_index_;
+
+    VkPhysicalDeviceDescriptorIndexingFeaturesEXT desc_indexing;
 
 
     VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
@@ -128,13 +131,30 @@ public:
         enabledDeviceExtensions.push_back(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME);
         enabledDeviceExtensions.push_back(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
         enabledDeviceExtensions.push_back(VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME);
+        enabledDeviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+        enabledDeviceExtensions.push_back("VK_AMD_shader_ballot");
 
+        enabledFeatures.shaderInt64 = VK_TRUE;
+        enabledFeatures.vertexPipelineStoresAndAtomics = VK_TRUE;
+        enabledFeatures.fragmentStoresAndAtomics = VK_TRUE;
+        enabledFeatures.geometryShader = VK_TRUE;
+        enabledFeatures.independentBlend = VK_TRUE;
+
+        memset(&desc_indexing, 0, sizeof(desc_indexing));
+        desc_indexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
+        desc_indexing.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+
+        deviceCreatepNextChain = &desc_indexing;
     }
 
     ~VulkanExample()
     {
         // Clean up used Vulkan resources
         // Note : Inherited destructor cleans up resources stored in base class
+        rprObjectDelete(scene_);
+        rprObjectDelete(color_framebuffer_);
+        rprObjectDelete(mat_system_);
+        rprObjectDelete(context_);
 
         destroyTextureImage(texture);
 
@@ -218,9 +238,31 @@ public:
     {
         VulkanExampleBase::prepareFrame();
 
+        std::array<VkSemaphore, 2> wait_semaphores =
+        {
+            semaphores.presentComplete,
+            framebuffer_ready_semaphores_[semaphore_index_]
+        };
+
+        std::array<VkSemaphore, 2> signal_semaphores =
+        {
+            semaphores.renderComplete,
+            framebuffer_release_semaphores_[semaphore_index_]
+        };
+        std::array<VkPipelineStageFlags, 2> wait_stages = {
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+        submitInfo.pWaitDstStageMask = wait_stages.data();
+
         // Command buffer to be sumitted to the queue
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &drawCmdBuffers[currentBuffer];
+
+        submitInfo.waitSemaphoreCount = wait_semaphores.size();
+        submitInfo.pWaitSemaphores = wait_semaphores.data();
+
+        submitInfo.signalSemaphoreCount = signal_semaphores.size();
+        submitInfo.pSignalSemaphores = signal_semaphores.data();
 
         // Submit to queue
         VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
@@ -440,6 +482,23 @@ public:
         }
         interop_info.framebuffers_release_semaphores = framebuffer_release_semaphores_.data();
 
+        // Set release semaphores to signalled state
+        VkCommandBuffer fake_cmd_buffer;
+        fake_cmd_buffer = createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+        VK_CHECK_RESULT(vkEndCommandBuffer(fake_cmd_buffer));
+
+        VkSubmitInfo info;
+        info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        info.pSignalSemaphores = framebuffer_release_semaphores_.data();
+        info.signalSemaphoreCount = framebuffer_release_semaphores_.size();
+        info.pWaitSemaphores = nullptr;
+        info.waitSemaphoreCount = 0;
+        info.pCommandBuffers = &fake_cmd_buffer;
+        info.commandBufferCount = 1;
+
+        VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &info, VK_NULL_HANDLE));
+        VK_CHECK_RESULT(vkQueueWaitIdle(queue));
+
         rpr_context_properties properties[] =
         {
             (void*)RPR_CONTEXT_CREATEPROP_VK_INTEROP_INFO, &interop_info,
@@ -494,10 +553,14 @@ public:
         camFront.z = cos(glm::radians(rotation.x)) * cos(glm::radians(rotation.y));
         camFront = glm::normalize(camFront);
 
-        CHECK_RPR(rprCameraLookAt(camera_,
+/*        CHECK_RPR(rprCameraLookAt(camera_,
             cameraPos.x, cameraPos.y, cameraPos.z,
             camFront.x, camFront.y, camFront.z,
-            0.0f, 1.0f, 0.0f));
+            0.0f, 1.0f, 0.0f));*/
+        CHECK_RPR(rprCameraLookAt(camera_,
+            -0.2f, 1.3f, 12.6f,
+            -0.2f, 1.3f, 5.6f,
+            0.f, 1.f, 0.f));
         CHECK_RPR(rprCameraSetSensorSize(camera_, 36.f, 24.f)); //Standart 36x24 sensor
         CHECK_RPR(rprSceneSetCamera(scene_, camera_));
     }
@@ -520,9 +583,9 @@ public:
         // This separates all the sampling information from the texture data. This means you could have multiple sampler objects for the same texture with different settings
         // Note: Similar to the samplers available with OpenGL 3.3
         VkSamplerCreateInfo sampler = vks::initializers::samplerCreateInfo();
-        sampler.magFilter = VK_FILTER_LINEAR;
-        sampler.minFilter = VK_FILTER_LINEAR;
-        sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        sampler.magFilter = VK_FILTER_NEAREST;
+        sampler.minFilter = VK_FILTER_NEAREST;
+        sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
         sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
         sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
         sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
@@ -544,7 +607,7 @@ public:
         // information and sub resource ranges
         VkImageViewCreateInfo view = vks::initializers::imageViewCreateInfo();
         view.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view.format = VK_FORMAT_R16G16B16A16_UNORM;
+        view.format = VK_FORMAT_R16G16B16A16_SFLOAT;
         view.components = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
         // The subresource range describes the set of mip levels (and array layers) that can be accessed through this image view
         // It's possible to create multiple image views for a single image referring to different (and/or overlapping) ranges of the image
@@ -561,6 +624,8 @@ public:
 
         texture.image = image;
 
+        texture.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
     }
     void prepare()
     {
@@ -569,6 +634,11 @@ public:
         initRpr();
         initAovs();
         initScene();
+
+        CHECK_RPR(rprContextRender(context_));
+
+        vkDeviceWaitIdle(device);
+
 
         loadTextureFromRprFb();
 
@@ -588,6 +658,11 @@ public:
             return;
 
         CHECK_RPR(rprContextRender(context_));
+        CHECK_RPR(rprContextFlushFrameBuffers(context_));
+
+
+        CHECK_RPR(rprContextGetInfo(context_, RPR_CONTEXT_INTEROP_SEMAPHORE_INDEX,
+            sizeof(semaphore_index_), &semaphore_index_, nullptr));
 
         draw();
     }

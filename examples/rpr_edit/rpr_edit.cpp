@@ -117,9 +117,11 @@ public:
     rpr_framebuffer color_framebuffer_;
     rpr_camera camera_;
     rpr_shape mesh_;
+    rpr_material_node base_material_;
     std::uint32_t semaphore_index_;
 
     std::int32_t quality = 0;
+    bool enableMeshUpdate = true;
 
     VkPhysicalDeviceDescriptorIndexingFeaturesEXT desc_indexing;
 
@@ -128,7 +130,7 @@ public:
     {
         zoom = -2.5f;
         rotation = { 0.0f, 15.0f, 0.0f };
-        title = "RPR basic render";
+        title = "RPR mesh update";
         settings.overlay = true;
         enabledDeviceExtensions.push_back(VK_EXT_SHADER_SUBGROUP_BALLOT_EXTENSION_NAME);
         enabledDeviceExtensions.push_back(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME);
@@ -523,7 +525,7 @@ public:
             {
                 float z = sin(x_step * x + y_step * y);
                 vertices_data[y * x_size + x].position = glm::vec4(x_step * x, z, y_step * y, 1.0f);
-                vertices_data[y * x_size + x].normal = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+                vertices_data[y * x_size + x].normal = glm::vec4(0.0f, -1.0f, 0.0f, 0.0f);
                 vertices_data[y * x_size + x].uv0 = glm::vec2(x_step * x, y_step * y);
                 vertices_data[y * x_size + x].uv1 = glm::vec2(0.0f, 0.0f);
             }
@@ -567,6 +569,12 @@ public:
             num_face_verts.data(), num_face_verts.size(),
             &mesh_));
 
+
+        //Create basic material
+        CHECK_RPR(rprMaterialSystemCreateNode(mat_system_, RPR_MATERIAL_NODE_UBERV2, &base_material_));
+        CHECK_RPR(rprMaterialNodeSetInputUByKey(base_material_, RPR_UBER_MATERIAL_LAYERS, RPR_UBER_MATERIAL_LAYER_DIFFUSE));
+        CHECK_RPR(rprMaterialNodeSetInputFByKey(base_material_, RPR_MATERIAL_INPUT_UBER_DIFFUSE_COLOR, 0.8f, 0.8f, 0.8f, 1.0f));
+        CHECK_RPR(rprShapeSetMaterial(mesh_, base_material_));
 
         CHECK_RPR(rprSceneAttachShape(scene_, mesh_));
 
@@ -700,7 +708,7 @@ public:
         {
             for (std::size_t x = 0; x < x_size; ++x)
             {
-                float z = 3.f * sin(x_step * x * y_step * y * z_delta);
+                float z = 1.f * sin(x_step * x * y_step * y * z_delta);
                 vertices_data[y * x_size + x].position = glm::vec4(x_step * x, z, y_step * y, 1.0f);
                 vertices_data[y * x_size + x].normal = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
                 vertices_data[y * x_size + x].uv0 = glm::vec2(x_step * x, y_step * y);
@@ -741,7 +749,10 @@ public:
 
         draw();
 
-        updateMesh();
+        if (enableMeshUpdate)
+        {
+            updateMesh();
+        }
     }
 
     virtual void viewChanged()
@@ -775,6 +786,7 @@ public:
             {
                 updateQuality();
             }
+            overlay->checkBox("Enable mesh update", &enableMeshUpdate);
         }
     }
 };

@@ -84,7 +84,7 @@ VkResult VulkanExampleBase::createInstance(bool enableValidation)
 			instanceCreateInfo.ppEnabledLayerNames = &validationLayerName;
 			instanceCreateInfo.enabledLayerCount = 1;
 		} else {
-			std::cerr << "Validation layer VK_LAYER_KHRONOS_validation not present, validation is disabled";
+			std::cerr << "Validation layer VK_LAYER_KHRONOS_validation not present, validation is disabled" << std::endl;
 		}
 	}
 	return vkCreateInstance(&instanceCreateInfo, nullptr, &instance);

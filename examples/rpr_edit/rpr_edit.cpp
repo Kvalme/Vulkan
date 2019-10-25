@@ -703,7 +703,7 @@ public:
         float x_step = 1.f / (float)x_size;
         float y_step = 1.f / (float)y_size;
 
-        //Made custom scene with plane
+        //Modify vertices
         for (std::size_t y = 0; y < y_size; ++y)
         {
             for (std::size_t x = 0; x < x_size; ++x)
@@ -720,19 +720,21 @@ public:
         else if (z_delta < 0.01) zdd = -zdd;
         z_delta += zdd;
 
+        //Fill update data
         DataChange vertex_changes;
         vertex_changes.stride = sizeof(Vertex);
         vertex_changes.src_offset = 0;
         vertex_changes.first_vertex = 0;
         vertex_changes.vertex_count = x_size * y_size;
 
+        //Update all vertices
         CHECK_RPR(rprMeshUpdate(mesh_, (float*)vertices_data.data(), &vertex_changes, 1, x_size * y_size * sizeof(Vertex),
             0, 0, 0, 0,
             0, 0, 0, 0,
             0, 0, 0, 0));
 
+        //Mesh update requires framebuffer clear
         CHECK_RPR(rprFrameBufferClear(color_framebuffer_));
-
     }
 
     virtual void render()

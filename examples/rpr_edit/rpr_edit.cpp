@@ -589,17 +589,7 @@ public:
 
         camera.setPosition(glm::vec3(-0.2f, 1.3f, 12.6f));
 
-        glm::vec3 camFront;
-        camFront.x = -cos(glm::radians(camera.rotation.x)) * sin(glm::radians(camera.rotation.y));
-        camFront.y = sin(glm::radians(camera.rotation.x));
-        camFront.z = cos(glm::radians(camera.rotation.x)) * cos(glm::radians(camera.rotation.y));
-        camFront = glm::normalize(camFront);
-
-        //updateUniformBuffers();
-        CHECK_RPR(rprCameraLookAt(camera_,
-            camera.position.x, camera.position.y, camera.position.z,
-            camFront.x, camFront.y, camFront.z,
-            0.0f, 1.0f, 0.0f));
+        CHECK_RPR(rprCameraSetTransform(camera_, false, (float*)&(camera.matrices.view)));
 
         CHECK_RPR(rprCameraSetSensorSize(camera_, 36.f, 24.f)); //Standart 36x24 sensor
         CHECK_RPR(rprSceneSetCamera(scene_, camera_));
@@ -759,18 +749,7 @@ public:
 
     virtual void viewChanged()
     {
-        camera.type = Camera::firstperson;
-        glm::vec3 camFront;
-        camFront.x = -cos(glm::radians(camera.rotation.x)) * sin(glm::radians(camera.rotation.y));
-        camFront.y = sin(glm::radians(camera.rotation.x));
-        camFront.z = cos(glm::radians(camera.rotation.x)) * cos(glm::radians(camera.rotation.y));
-        camFront = glm::normalize(camFront);
-
-        CHECK_RPR(rprCameraLookAt(camera_,
-            camera.position.x, camera.position.y, camera.position.z,
-            camFront.x, camFront.y, camFront.z,
-            0.0f, 1.0f, 0.0f));
-
+        CHECK_RPR(rprCameraSetTransform(camera_, false, (float*)&(camera.matrices.view)));
         CHECK_RPR(rprFrameBufferClear(color_framebuffer_));
     }
 

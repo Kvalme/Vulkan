@@ -52,6 +52,7 @@ endfunction(buildExamples)
 set(EXAMPLES
     rpr_base_render
     rpr_edit
+    rpr_wireframe
 )
 
 buildExamples()

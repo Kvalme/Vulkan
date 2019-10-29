@@ -34,7 +34,7 @@
 #ifndef WIN32
     #define PLUGIN_NAME "../libs/Rpr/Hybrid.so"
 #else
-    #define PLUGIN_NAME "../libs/Rpr/Hybrid.dll"
+    #define PLUGIN_NAME "../bin/Rpr/Hybrid.dll"
 #endif
 
 #define CHECK_RPR(x) \

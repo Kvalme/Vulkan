@@ -34,7 +34,7 @@
 #ifndef WIN32
     #define PLUGIN_NAME "../libs/Rpr/Hybrid.so"
 #else
-    #define PLUGIN_NAME "../libs/Rpr/Hybrid.dll"
+    #define PLUGIN_NAME "../bin/Rpr/Hybrid.dll"
 #endif
 
 #define CHECK_RPR(x) \
@@ -62,19 +62,58 @@ public:
         uint32_t mipLevels;
     } texture;
 
-    struct {
+    struct VertexInfo
+    {
         VkPipelineVertexInputStateCreateInfo inputState;
         std::vector<VkVertexInputBindingDescription> bindingDescriptions;
         std::vector<VkVertexInputAttributeDescription> attributeDescriptions;
     } vertices;
+
+    VertexInfo mesh_vertices;
+
+    // Vertex layout used in this example
+    // This must fit input locations of the vertex shader used to render the model
+    struct Vertex {
+        glm::vec4 position;
+        glm::vec4 normal;
+        glm::vec2 uv0;
+        glm::vec2 uv1;
+    };
+
+    struct {
+        vks::Buffer scene;
+    } uniformBuffers;
+
+    struct {
+        glm::mat4 projection;
+        glm::mat4 model;
+    } uboVS;
+
+    std::vector<Vertex> vertices_data;
+    std::vector<std::int32_t> index_data;
+
+    std::size_t x_size = 16;
+    std::size_t y_size = 16;
+
+    VkBuffer meshVertexBuffer;
+    VkBuffer meshIndexBuffer;
+    std::size_t meshPolygonCount;
+
+    bool wireframe = false;
+    bool previous_wireframe_value = false;
 
     vks::Buffer vertexBuffer;
     vks::Buffer indexBuffer;
     uint32_t indexCount;
 
     struct {
-        VkPipeline solid;
+        VkPipeline rpr_blit;
+        VkPipeline wireframe;
     } pipelines;
+
+    VkPipelineLayout wireframePipelineLayout;
+    VkDescriptorSet wireframeDescriptorSet;
+    VkDescriptorSetLayout wireframeDescriptorSetLayout;
 
     VkPipelineLayout pipelineLayout;
     VkDescriptorSet descriptorSet;
@@ -98,6 +137,8 @@ public:
     rpr_scene scene_;
     rpr_framebuffer color_framebuffer_;
     rpr_camera camera_;
+    rpr_shape mesh_;
+    rpr_material_node base_material_;
     std::uint32_t semaphore_index_;
 
     std::int32_t quality = 0;
@@ -122,6 +163,7 @@ public:
         enabledFeatures.fragmentStoresAndAtomics = VK_TRUE;
         enabledFeatures.geometryShader = VK_TRUE;
         enabledFeatures.independentBlend = VK_TRUE;
+        enabledFeatures.fillModeNonSolid = VK_TRUE;
 
         memset(&desc_indexing, 0, sizeof(desc_indexing));
         desc_indexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
@@ -141,7 +183,7 @@ public:
 
         destroyTextureImage(texture);
 
-        vkDestroyPipeline(device, pipelines.solid, nullptr);
+        vkDestroyPipeline(device, pipelines.rpr_blit, nullptr);
 
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
@@ -202,11 +244,27 @@ public:
             vkCmdSetScissor(drawCmdBuffers[i], 0, 1, &scissor);
 
             vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, NULL);
-            vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.solid);
+            vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.rpr_blit);
 
             //VkDeviceSize offsets[1] = { 0 };
 
             vkCmdDraw(drawCmdBuffers[i], 3, 1, 0, 0);
+
+            //Draw Wireframe
+            if (wireframe)
+            {
+                vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, wireframePipelineLayout, 0, 1, &wireframeDescriptorSet, 0, NULL);
+                vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.wireframe);
+
+                VkDeviceSize offsets[1] = { 0 };
+                // Bind mesh vertex buffer
+                vkCmdBindVertexBuffers(drawCmdBuffers[i], VERTEX_BUFFER_BIND_ID, 1, &meshVertexBuffer, offsets);
+                // Bind mesh index buffer
+                vkCmdBindIndexBuffer(drawCmdBuffers[i], meshIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                // Render mesh vertex buffer using it's indices
+                vkCmdDrawIndexed(drawCmdBuffers[i], meshPolygonCount * 3, 1, 0, 0, 0);
+
+            }
 
             drawUI(drawCmdBuffers[i]);
 
@@ -260,6 +318,33 @@ public:
         vertices.inputState.pVertexBindingDescriptions = nullptr;
         vertices.inputState.vertexAttributeDescriptionCount = 0;
         vertices.inputState.pVertexAttributeDescriptions = nullptr;
+
+        // Binding description for wireframe mode
+        // Binding description
+        mesh_vertices.bindingDescriptions.resize(1);
+        mesh_vertices.bindingDescriptions[0] =
+        vks::initializers::vertexInputBindingDescription(
+            VERTEX_BUFFER_BIND_ID, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX);
+
+        // Attribute descriptions
+        // Describes memory layout and shader positions
+        // For wireframe we only need to pass positions
+        mesh_vertices.attributeDescriptions.resize(1);
+        // Location 0 : Position
+        mesh_vertices.attributeDescriptions[0] =
+        vks::initializers::vertexInputAttributeDescription(
+            VERTEX_BUFFER_BIND_ID,
+            0,
+            VK_FORMAT_R32G32B32_SFLOAT,
+            offsetof(Vertex, position));
+
+        mesh_vertices.inputState = vks::initializers::pipelineVertexInputStateCreateInfo();
+        mesh_vertices.inputState.vertexBindingDescriptionCount =
+            static_cast<uint32_t>(mesh_vertices.bindingDescriptions.size());
+        mesh_vertices.inputState.pVertexBindingDescriptions = mesh_vertices.bindingDescriptions.data();
+        mesh_vertices.inputState.vertexAttributeDescriptionCount =
+            static_cast<uint32_t>(mesh_vertices.attributeDescriptions.size());
+        mesh_vertices.inputState.pVertexAttributeDescriptions = mesh_vertices.attributeDescriptions.data();
     }
 
     void setupDescriptorPool()
@@ -267,6 +352,7 @@ public:
         // Example uses one ubo and one image sampler
         std::vector<VkDescriptorPoolSize> poolSizes =
         {
+            vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1),
             vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1)
         };
 
@@ -280,57 +366,99 @@ public:
 
     void setupDescriptorSetLayout()
     {
-        std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings =
         {
-            // Binding 0 : Fragment shader image sampler
-            vks::initializers::descriptorSetLayoutBinding(
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                VK_SHADER_STAGE_FRAGMENT_BIT,
-                0)
-        };
+            std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings =
+            {
+                // Binding 0 : Fragment shader image sampler
+                vks::initializers::descriptorSetLayoutBinding(
+                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    VK_SHADER_STAGE_FRAGMENT_BIT,
+                    0)
+            };
 
-        VkDescriptorSetLayoutCreateInfo descriptorLayout =
-        vks::initializers::descriptorSetLayoutCreateInfo(
-            setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
+            VkDescriptorSetLayoutCreateInfo descriptorLayout =
+            vks::initializers::descriptorSetLayoutCreateInfo(
+                setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
 
-        VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
+            VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
 
-        VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
-        vks::initializers::pipelineLayoutCreateInfo(
-            &descriptorSetLayout,
-            1);
+            VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
+            vks::initializers::pipelineLayoutCreateInfo(
+                &descriptorSetLayout,
+                1);
 
-        VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+            VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+        }
+        //Wireframe
+        {
+            std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings =
+            {
+                // Binding 0 : Vertex shader uniform buffer
+                vks::initializers::descriptorSetLayoutBinding(
+                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                    VK_SHADER_STAGE_VERTEX_BIT,
+                    0)
+            };
+
+            VkDescriptorSetLayoutCreateInfo descriptorLayout =
+            vks::initializers::descriptorSetLayoutCreateInfo(
+                setLayoutBindings.data(),
+                static_cast<uint32_t>(setLayoutBindings.size()));
+
+            VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &wireframeDescriptorSetLayout));
+
+            VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
+            vks::initializers::pipelineLayoutCreateInfo(
+                &wireframeDescriptorSetLayout,
+                1);
+
+            VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &wireframePipelineLayout));
+        }
     }
 
     void setupDescriptorSet()
     {
-        VkDescriptorSetAllocateInfo allocInfo =
-        vks::initializers::descriptorSetAllocateInfo(
-            descriptorPool,
-            &descriptorSetLayout,
-            1);
-
-        VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
-
-        // Setup a descriptor image info for the current texture to be used as a combined image sampler
-        VkDescriptorImageInfo textureDescriptor;
-        textureDescriptor.imageView = texture.view;				// The image's view (images are never directly accessed by the shader, but rather through views defining subresources)
-        textureDescriptor.sampler = texture.sampler;			// The sampler (Telling the pipeline how to sample the texture, including repeat, border, etc.)
-        textureDescriptor.imageLayout = texture.imageLayout;	// The current layout of the image (Note: Should always fit the actual use, e.g. shader read)
-
-        std::vector<VkWriteDescriptorSet> writeDescriptorSets =
         {
-                // Binding 1 : Fragment shader texture sampler
-                //	Fragment shader: layout (binding = 1) uniform sampler2D samplerColor;
-                vks::initializers::writeDescriptorSet(
-                    descriptorSet,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,		// The descriptor set will use a combined image sampler (sampler and image could be split)
-                0,												// Shader binding point 1
-                &textureDescriptor)								// Pointer to the descriptor image for our texture
-        };
+            VkDescriptorSetAllocateInfo allocInfo =
+            vks::initializers::descriptorSetAllocateInfo(
+                descriptorPool,
+                &descriptorSetLayout,
+                1);
 
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+            VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
+
+            // Setup a descriptor image info for the current texture to be used as a combined image sampler
+            VkDescriptorImageInfo textureDescriptor;
+            textureDescriptor.imageView = texture.view;				// The image's view (images are never directly accessed by the shader, but rather through views defining subresources)
+            textureDescriptor.sampler = texture.sampler;			// The sampler (Telling the pipeline how to sample the texture, including repeat, border, etc.)
+            textureDescriptor.imageLayout = texture.imageLayout;	// The current layout of the image (Note: Should always fit the actual use, e.g. shader read)
+
+            std::vector<VkWriteDescriptorSet> writeDescriptorSets =
+            {
+                    // Binding 1 : Fragment shader texture sampler
+                    //	Fragment shader: layout (binding = 1) uniform sampler2D samplerColor;
+                    vks::initializers::writeDescriptorSet(
+                        descriptorSet,
+                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,		// The descriptor set will use a combined image sampler (sampler and image could be split)
+                    0,												// Shader binding point 1
+                    &textureDescriptor)								// Pointer to the descriptor image for our texture
+            };
+
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+        }
+        //Wireframe
+        {
+            VkDescriptorSetAllocateInfo allocInfo =
+                vks::initializers::descriptorSetAllocateInfo(descriptorPool, &wireframeDescriptorSetLayout, 1);
+            VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &wireframeDescriptorSet));
+
+            std::vector<VkWriteDescriptorSet> writeDescriptorSets = {
+                // Binding 0 : Vertex shader uniform buffer
+                vks::initializers::writeDescriptorSet(wireframeDescriptorSet, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &uniformBuffers.scene.descriptor),
+            };
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+
+        }
     }
 
     void preparePipelines()
@@ -385,8 +513,8 @@ public:
         // Load shaders
         std::array<VkPipelineShaderStageCreateInfo,2> shaderStages;
 
-        shaderStages[0] = loadShader(getAssetPath() + "shaders/rpr_base_render/fullscreen_quad.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-        shaderStages[1] = loadShader(getAssetPath() + "shaders/rpr_base_render/output.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+        shaderStages[0] = loadShader(getAssetPath() + "shaders/rpr_wireframe/fullscreen_quad.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+        shaderStages[1] = loadShader(getAssetPath() + "shaders/rpr_wireframe/output.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 
         VkGraphicsPipelineCreateInfo pipelineCreateInfo =
         vks::initializers::pipelineCreateInfo(
@@ -405,7 +533,53 @@ public:
         pipelineCreateInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
         pipelineCreateInfo.pStages = shaderStages.data();
 
-        VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.solid));
+        VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.rpr_blit));
+
+        //Create wireframe pipeline
+        rasterizationState.polygonMode = VK_POLYGON_MODE_LINE;
+        rasterizationState.lineWidth = 1.0f;
+        std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages_wireframe;
+
+        shaderStages[0] = loadShader(getAssetPath() + "shaders/rpr_wireframe/wireframe.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+        shaderStages[1] = loadShader(getAssetPath() + "shaders/rpr_wireframe/wireframe.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+
+        pipelineCreateInfo.pVertexInputState = &mesh_vertices.inputState;
+        pipelineCreateInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+        pipelineCreateInfo.pStages = shaderStages.data();
+        pipelineCreateInfo.layout = wireframePipelineLayout;
+
+        depthStencilState.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+
+        VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.wireframe));
+    }
+
+    // Prepare and initialize uniform buffer containing shader uniforms
+    void prepareUniformBuffers()
+    {
+        // Vertex shader uniform buffer block
+        VK_CHECK_RESULT(vulkanDevice->createBuffer(
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &uniformBuffers.scene,
+            sizeof(uboVS)));
+
+        // Map persistent
+        VK_CHECK_RESULT(uniformBuffers.scene.map());
+
+        updateUniformBuffers();
+    }
+
+    void updateUniformBuffers()
+    {
+        uboVS.projection = glm::perspective(glm::radians(60.0f), (float)width / (float)height, 0.1f, 256.0f);
+        glm::mat4 viewMatrix = camera.matrices.view;
+
+        uboVS.model = viewMatrix;/* * glm::translate(glm::mat4(1.0f), cameraPos);
+        uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
+        uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
+        uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));*/
+
+        memcpy(uniformBuffers.scene.mapped, &uboVS, sizeof(uboVS));
     }
 
     void initRpr()
@@ -492,9 +666,76 @@ public:
 
     void initScene()
     {
-        // Load up basic scene
-        CHECK_RPR(rprLoadScene("../data/models/CornellBox/orig.objm", "../data/models/CornellBox/",
-            context_, mat_system_, &scene_));
+        float x_step = 2.f / (float)x_size;
+        float y_step = 2.f / (float)y_size;
+        vertices_data.resize(x_size * y_size);
+        //Made custom scene with plane
+        for (std::size_t y = 0; y < y_size; ++y)
+        {
+            for (std::size_t x = 0; x < x_size; ++x)
+            {
+                float z = sin(x_step * x + y_step * y);
+                vertices_data[y * x_size + x].position = glm::vec4(x_step * x, z, y_step * y, 1.0f);
+                vertices_data[y * x_size + x].normal = glm::vec4(0.0f, -1.0f, 0.0f, 0.0f);
+                vertices_data[y * x_size + x].uv0 = glm::vec2(x_step * x, y_step * y);
+                vertices_data[y * x_size + x].uv1 = glm::vec2(0.0f, 0.0f);
+            }
+        }
+
+        std::int32_t quads_per_line = (x_size - 1);
+        std::int32_t lines = (y_size - 1);
+
+        std::vector<rpr_int> num_face_verts;
+
+        for (std::int32_t y = 0; y < lines; ++y)
+        {
+            for (std::int32_t x = 0; x < quads_per_line; ++x)
+            {
+                //Triangle 1
+                index_data.push_back(x + y * x_size);
+                index_data.push_back(x + 1 + y * x_size);
+                index_data.push_back(x + (y + 1) * x_size);
+
+                //Triangle 2
+                index_data.push_back(x + 1 + y * x_size);
+                index_data.push_back(x + 1 + (y + 1) * x_size);
+                index_data.push_back(x + (y + 1) * x_size);
+
+                num_face_verts.push_back(3);
+                num_face_verts.push_back(3);
+            }
+        }
+
+
+        float *dta = (float*)(vertices_data.data());
+
+
+        CHECK_RPR(rprContextCreateMesh(context_,
+            dta, vertices_data.size(), sizeof(Vertex),
+            dta + 4, vertices_data.size(), sizeof(Vertex),
+            dta + 8, vertices_data.size(), sizeof(Vertex),
+            index_data.data(), sizeof(std::int32_t),
+            index_data.data(), sizeof(std::int32_t),
+            index_data.data(), sizeof(std::int32_t),
+            num_face_verts.data(), num_face_verts.size(),
+            &mesh_));
+
+
+        //Get poly count, vertex and index buffers
+        CHECK_RPR(rprMeshGetInfo(mesh_, RPR_MESH_POLYGON_COUNT, sizeof(std::size_t), &meshPolygonCount, 0));
+        CHECK_RPR(rprMeshGetInfo(mesh_, RPR_MESH_VK_VERTEX_BUFFER, sizeof(VkBuffer), &meshVertexBuffer, 0));
+        CHECK_RPR(rprMeshGetInfo(mesh_, RPR_MESH_VK_INDEX_BUFFER, sizeof(VkBuffer), &meshIndexBuffer, 0));
+
+
+        //Create basic material
+        CHECK_RPR(rprMaterialSystemCreateNode(mat_system_, RPR_MATERIAL_NODE_UBERV2, &base_material_));
+        CHECK_RPR(rprMaterialNodeSetInputUByKey(base_material_, RPR_UBER_MATERIAL_LAYERS, RPR_UBER_MATERIAL_LAYER_DIFFUSE));
+        CHECK_RPR(rprMaterialNodeSetInputFByKey(base_material_, RPR_MATERIAL_INPUT_UBER_DIFFUSE_COLOR, 0.8f, 0.8f, 0.8f, 1.0f));
+        CHECK_RPR(rprShapeSetMaterial(mesh_, base_material_));
+
+        CHECK_RPR(rprSceneAttachShape(scene_, mesh_));
+
+
         CHECK_RPR(rprContextSetScene(context_, scene_));
 
         //Init camera
@@ -594,6 +835,7 @@ public:
         loadTextureFromRprFb();
 
         setupVertexDescriptions();
+        prepareUniformBuffers();
         setupDescriptorSetLayout();
         preparePipelines();
         setupDescriptorPool();
@@ -610,9 +852,19 @@ public:
         CHECK_RPR(rprContextRender(context_));
         CHECK_RPR(rprContextFlushFrameBuffers(context_));
 
-
         CHECK_RPR(rprContextGetInfo(context_, RPR_CONTEXT_INTEROP_SEMAPHORE_INDEX,
             sizeof(semaphore_index_), &semaphore_index_, nullptr));
+
+        if (camera.updated)
+        {
+            updateUniformBuffers();
+        }
+
+        if (previous_wireframe_value != wireframe)
+        {
+            buildCommandBuffers();
+            previous_wireframe_value = wireframe;
+        }
 
         draw();
     }
@@ -638,6 +890,8 @@ public:
             {
                 updateQuality();
             }
+
+            overlay->checkBox("Wireframe", &wireframe);
         }
     }
 };

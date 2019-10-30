@@ -53,6 +53,7 @@ set(EXAMPLES
     rpr_base_render
     rpr_edit
     rpr_wireframe
+    rpr_gizmo
 )
 
 buildExamples()

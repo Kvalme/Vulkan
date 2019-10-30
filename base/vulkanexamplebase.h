@@ -60,7 +60,7 @@ private:
 	// Get window title with example name, device, et.
 	std::string getWindowTitle();
 	/** brief Indicates that the view (position, rotation) has changed and buffers containing camera matrices need to be updated */
-	bool viewUpdated = false;
+	bool viewUpdated = true;
 	// Destination dimensions for resizing the window
 	uint32_t destWidth;
 	uint32_t destHeight;

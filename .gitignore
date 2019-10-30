@@ -227,3 +227,11 @@ data/models/cerberus/*.*
 
 # Ignore macOS .DS_Store
 .DS_Store
+
+# RPR
+external/rpr/
+libs/rpr/
+bin/rpr
+
+examples/cache/
+examples/imgui.ini

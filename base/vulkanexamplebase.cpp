@@ -2242,7 +2242,7 @@ void VulkanExampleBase::handleMouseMove(int32_t x, int32_t y)
 	if (mouseButtons.left) {
 		rotation.x += dy * rotationSpeed;
 		rotation.y -= dx * rotationSpeed;
-		cameraController.rotate(glm::vec3(dy * cameraController.rotationSpeed, -dx * cameraController.rotationSpeed, 0.0f));
+		cameraController.rotate(glm::vec3(dy * cameraController.rotationSpeed, dx * cameraController.rotationSpeed, 0.0f));
 		viewUpdated = true;
 	}
 	if (mouseButtons.right) {

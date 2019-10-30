@@ -16,6 +16,8 @@ layout (binding = 0) uniform UBO
 	mat4 model;
     mat4 view;
 	mat4 projection;
+    int is_visible;
+    float scale;
 } ubo;
 
 layout (location = 0) out vec3 out_color;
@@ -34,9 +36,9 @@ void main()
     
     vec3 vert = vec3(0.0);
     
-    if ((gl_VertexIndex & 1) == 1)
+    if (ubo.is_visible > 0 && (gl_VertexIndex & 1) == 1)
     {
-        vert = vertices[gl_VertexIndex >> 1];
+        vert = vertices[gl_VertexIndex >> 1] * vec3(ubo.scale);
     }
     
     gl_Position = ubo.projection * ubo.view * ubo.model * vec4(vert.xyz, 1.0);

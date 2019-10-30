@@ -28,6 +28,8 @@
 #include "Rpr/RadeonProRender_VK.h"
 #include "Rpr/RadeonProRenderIO.h"
 
+#include "rpr/Math/math_utils.h"
+
 #define VERTEX_BUFFER_BIND_ID 0
 #define ENABLE_VALIDATION true
 
@@ -97,7 +99,7 @@ public:
     rpr_material_system mat_system_;
     rpr_scene scene_;
     rpr_framebuffer color_framebuffer_;
-    rpr_camera camera_;
+    rpr_camera rprCamera;
     std::uint32_t semaphore_index_;
 
     std::int32_t quality = 0;
@@ -111,7 +113,10 @@ public:
         std::int32_t selected_object_index = kNoObjectIndex;
         std::vector<std::string> object_names = { "" };
 
+        bool is_local = false;
+
         std::vector<rpr_shape> shapes;
+        std::vector<RadeonProRender::bbox> shape_aabbs;
 
         struct // Pipeline.
         {
@@ -126,6 +131,8 @@ public:
             glm::mat4 model;
             glm::mat4 view;
             glm::mat4 projection;
+            std::int32_t is_visible;
+            float scale = 1.0f;
         } ubo;
 
         vks::Buffer ubo_buffer;
@@ -246,14 +253,8 @@ public:
 
     void updateUniformBuffers()
     {
-        gizmo.ubo.projection = makeInfinitePerspectiveMatrix(0.330297351f,
-            (float)36/ (float)24, 0.1f);
-        //gizmo.ubo.projection = glm::perspective(glm::radians(60.0f), (float)width / (float)height, 0.1f, 256.0f);
-        //gizmo.ubo.projection = glm::transpose(gizmo.ubo.projection);
-        gizmo.ubo.projection = glm::mat4();
-        gizmo.ubo.view = camera.matrices.view;
-        //gizmo.ubo.view = glm::transpose(camera.matrices.view);
-        gizmo.ubo.view = glm::mat4();
+        gizmo.ubo.projection = cameraController.getProjection();
+        gizmo.ubo.view = cameraController.getView();
 
         if (gizmo.selected_object_index - 1 < gizmo.shapes.size())
         {
@@ -262,15 +263,30 @@ public:
             CHECK_RPR(rprShapeGetInfo(shape, RPR_SHAPE_TRANSFORM,
                 sizeof(glm::mat4), &shape_transform, nullptr));
 
-            //shape_transform = glm::translate(shape_transform, glm::vec3(0.01f, 0.0f, 0.0f));
+            auto center = gizmo.shape_aabbs[gizmo.selected_object_index - 1].center();
+            auto center_translate = glm::translate({}, glm::vec3(center.x, center.y, center.z));
 
-            /*CHECK_RPR(rprShapeSetTransform(shape, false,
-                reinterpret_cast<const rpr_float*>(&shape_transform)));*/
+            auto gizmo_model = shape_transform * center_translate;
 
-            static float scale = 1.0f;
-            gizmo.ubo.model = shape_transform;
-            gizmo.ubo.model = glm::scale(gizmo.ubo.model, { scale, scale, scale });
-            scale *= 0.999f;
+            if (!gizmo.is_local)
+            {
+                glm::mat4 translate_only;
+                translate_only[3][0] = gizmo_model[3][0];
+                translate_only[3][1] = gizmo_model[3][1];
+                translate_only[3][2] = gizmo_model[3][2];
+
+                gizmo_model = translate_only;
+            }
+    
+            gizmo.ubo.model = gizmo_model;
+
+            // Compute gizmo scale.
+            // Scale gizmo corner vertices to get the gizmo screen size to be independent on depth.
+            glm::vec4 zero_projected = gizmo.ubo.projection * gizmo.ubo.view * gizmo.ubo.model * 
+                glm::vec4(glm::vec3(0.0), 1.0);
+            float depth = zero_projected.z / zero_projected.w;
+            const float kGizmoScaleFactor = 0.01;
+            gizmo.ubo.scale = kGizmoScaleFactor / depth;
         }
 
         std::memcpy(gizmo.ubo_buffer.mapped, &gizmo.ubo, sizeof(gizmo.ubo));
@@ -321,7 +337,7 @@ public:
             vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, gizmo.pipeline_layout,
                 0, 1, &gizmo.descriptor_set, 0, nullptr);
 
-            vkCmdSetLineWidth(drawCmdBuffers[i], 2.0f);
+            vkCmdSetLineWidth(drawCmdBuffers[i], 3.0f);
             vkCmdDraw(drawCmdBuffers[i], 6, 1, 0, 0);
 
             drawUI(drawCmdBuffers[i]);
@@ -614,15 +630,24 @@ public:
         CHECK_RPR(rprContextSetScene(context_, scene_));
 
         //Init camera
-        CHECK_RPR(rprContextCreateCamera(context_, &camera_));
-        CHECK_RPR(rprCameraSetMode(camera_, RPR_CAMERA_MODE_PERSPECTIVE));
+        CHECK_RPR(rprContextCreateCamera(context_, &rprCamera));
+        CHECK_RPR(rprCameraSetMode(rprCamera, RPR_CAMERA_MODE_PERSPECTIVE));
 
-        camera.type = Camera::firstperson;
+        glm::vec3 eye = glm::vec3(0.0f, 1.5f, 10.0f);
+        glm::vec3 up = glm::vec3(0.f, 1.f, 0.f);
+        glm::vec3 at = glm::vec3(0.0f, 1.5f, 0.0f);
 
-        camera.setPosition(glm::vec3(-0.2f, 1.3f, 12.6f));
+        glm::vec2 sensor_size(0.036f, 0.024f);
+        float focal_length = 0.035f;
+
+        const float fovy = atan(sensor_size.y / (2.0f * focal_length));
+        const float aspect = sensor_size.x / sensor_size.y;
+
+        cameraController.setPerspective(fovy, aspect, 0.1f, 10000.f);
+        cameraController.LookAt(eye, at, up);
         
-        CHECK_RPR(rprCameraSetSensorSize(camera_, 36.f, 24.f)); //Standart 36x24 sensor
-        CHECK_RPR(rprSceneSetCamera(scene_, camera_));
+        CHECK_RPR(rprCameraSetSensorSize(rprCamera, sensor_size.x * 1000.f, sensor_size.y * 1000.f)); //Standart 36x24 sensor
+        CHECK_RPR(rprSceneSetCamera(scene_, rprCamera));
 
         rpr_light env_light = nullptr;
         CHECK_RPR(rprContextCreateEnvironmentLight(context_, &env_light));
@@ -644,10 +669,12 @@ public:
 
         for (auto shape_index = 0; shape_index < gizmo.shapes.size(); ++shape_index)
         {
+            auto shape = gizmo.shapes[shape_index];
+
             std::size_t name_size = 0;
-            CHECK_RPR(rprShapeGetInfo(gizmo.shapes[shape_index], RPR_SHAPE_NAME, 0, nullptr, &name_size));
+            CHECK_RPR(rprShapeGetInfo(shape, RPR_SHAPE_NAME, 0, nullptr, &name_size));
             std::vector<char> name(name_size);
-            CHECK_RPR(rprShapeGetInfo(gizmo.shapes[shape_index], RPR_SHAPE_NAME, name_size, name.data(), nullptr));
+            CHECK_RPR(rprShapeGetInfo(shape, RPR_SHAPE_NAME, name_size, name.data(), nullptr));
 
             if (name.size() > 1)
             {
@@ -657,6 +684,11 @@ public:
             {
                 gizmo.object_names.push_back("Shape " + std::to_string(shape_index));
             }
+
+            // Get aabb of the shape.
+            RadeonProRender::bbox shape_aabb;
+            CHECK_RPR(rprMeshGetInfo(shape, RPR_MESH_AABB, sizeof(shape_aabb), &shape_aabb, nullptr));
+            gizmo.shape_aabbs.push_back(shape_aabb);
         }
     }
 
@@ -881,21 +913,28 @@ public:
 
         if (gizmo.selected_object_index != gizmo.kNoObjectIndex)
         {
-            /*rpr_shape shape = gizmo.shapes[gizmo.selected_object_index - 1];
+            rpr_shape shape = gizmo.shapes[gizmo.selected_object_index - 1];
             glm::mat4 shape_transform;
             CHECK_RPR(rprShapeGetInfo(shape, RPR_SHAPE_TRANSFORM,
                 sizeof(glm::mat4), &shape_transform, nullptr));
 
-            shape_transform = glm::translate(shape_transform, glm::vec3(0.01f, 0.0f, 0.0f));
+            shape_transform = glm::translate(shape_transform, glm::vec3(0.005f, 0.0f, 0.0f));
+            shape_transform = glm::rotate(shape_transform, 0.01f, { 1, 1, 1 });
 
             CHECK_RPR(rprShapeSetTransform(shape, false, 
-                reinterpret_cast<const rpr_float*>(&shape_transform)));*/
+                reinterpret_cast<const rpr_float*>(&shape_transform)));
         }
     }
 
     virtual void viewChanged()
     {
-        CHECK_RPR(rprCameraSetTransform(camera_, false, (float*)&(camera.matrices.view)));
+        auto pos = cameraController.camera->GetPosition();
+        auto up = cameraController.camera->GetUpVector();
+        auto at = cameraController.camera->GetAt();
+
+        CHECK_RPR(rprCameraLookAt(rprCamera,
+            pos.x, pos.y, pos.z, at.x, at.y, at.z, up.x, up.y, up.z));
+
         CHECK_RPR(rprFrameBufferClear(color_framebuffer_));
     }
 
@@ -922,6 +961,8 @@ public:
             {
                 editObject();
             }
+
+            overlay->checkBox("Local", &gizmo.is_local);
         }
     }
 
@@ -930,6 +971,8 @@ public:
         if (!gizmo.active())
         {
             // Reset editing.
+            gizmo.ubo.is_visible = 0;
+            updateUniformBuffers();
         }
         else
         {
@@ -938,8 +981,65 @@ public:
 
             // Start edit object.
 
-            gizmo.ubo_need_update = true;
+            gizmo.ubo.is_visible = 1;
+            updateUniformBuffers();
         }
+    }
+
+    void mouseMoved(double x, double y, bool &handled) override
+    {
+        if (!mouseButtons.left || !gizmo.active())
+        {
+            return;
+        }
+
+        // Define whether any of the gizmo axis was hitted.
+        
+        glm::vec2 screen_pos = { float(x), float(y) };
+        glm::vec2 click_pos_ndc = (screen_pos / glm::vec2(width, height)) * 2.0f - glm::vec2(1.0f);
+
+        const glm::vec4 basis_verts[] = 
+            { {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f} };
+
+        auto origin_projected = gizmo.ubo.projection * gizmo.ubo.view * gizmo.ubo.model * 
+            glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        origin_projected /= origin_projected.w;
+
+        float min_eps = FLT_MAX;
+
+        auto axis_index = 0u;
+        auto clicked_axis_index = ~0u;
+
+        for (const auto& basis_vert : basis_verts)
+        {
+            auto basis_projected = gizmo.ubo.projection * gizmo.ubo.view * gizmo.ubo.model *
+                gizmo.ubo.scale * basis_vert;
+            basis_projected /= basis_projected.w;
+
+            float eps = std::fabsf((click_pos_ndc.x - origin_projected.x) / (basis_projected.x - origin_projected.x) -
+                (click_pos_ndc.y - origin_projected.y) / (basis_projected.y - origin_projected.y));
+
+            constexpr float kClickEps = 0.2f;
+            if (eps < kClickEps && eps < min_eps)
+            {
+                min_eps = eps;
+                clicked_axis_index = axis_index;
+            }
+
+            ++axis_index;
+        }
+
+        if (clicked_axis_index != ~0)
+        {
+            handled = true;
+
+            const char labels[] = { 'X', 'Y', 'Z' };
+
+            std::cout << "Clicked: " << labels[axis_index] << ", eps = " << min_eps << std::endl;
+        }
+        
+
+
     }
 };
 

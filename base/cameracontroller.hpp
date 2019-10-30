@@ -84,7 +84,7 @@ public:
 	glm::vec3 position = glm::vec3();
 
 	float rotationSpeed = 1.0f;
-	float movementSpeed = 1.0f;
+	float movementSpeed = 3.0f;
 
 	bool updated = false;
 
@@ -186,9 +186,9 @@ public:
             if (keys.down)
                 camera->MoveForward(-moveSpeed);
             if (keys.left)
-                camera->MoveRight(moveSpeed);
-            if (keys.right)
                 camera->MoveRight(-moveSpeed);
+            if (keys.right)
+                camera->MoveRight(moveSpeed);
 
             updateViewMatrix();
         }

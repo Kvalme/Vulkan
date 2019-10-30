@@ -745,9 +745,10 @@ public:
         glm::vec3 up = glm::vec3(0.f, 1.f, 0.f);
         glm::vec3 at = glm::vec3(-0.2f, 1.3f, 5.6f);
 
-        glm::vec2 sensor_size(0.035f, 0.024f);
+        glm::vec2 sensor_size(0.036f, 0.024f);
+        float focal_length = 0.035f;
 
-        const float fovy = atan(sensor_size.y / (2.0f * sensor_size.x));
+        const float fovy = atan(sensor_size.y / (2.0f * focal_length));
         const float aspect = sensor_size.x / sensor_size.y;
 
         cameraController.setPerspective(fovy, aspect, 0.1f, 10000.f);

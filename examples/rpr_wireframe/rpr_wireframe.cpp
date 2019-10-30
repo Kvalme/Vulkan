@@ -130,18 +130,21 @@ public:
     std::array<VkSemaphore, frames_in_flight_> framebuffer_ready_semaphores_;
 
     rprContextFlushFrameBuffers_func rprContextFlushFrameBuffers;
+    rprMeshUpdate_func rprMeshUpdate;
+
 
     // RPR
     rpr_context context_;
     rpr_material_system mat_system_;
     rpr_scene scene_;
     rpr_framebuffer color_framebuffer_;
-    rpr_camera camera_;
+    rpr_camera rprCamera;
     rpr_shape mesh_;
     rpr_material_node base_material_;
     std::uint32_t semaphore_index_;
 
     std::int32_t quality = 0;
+    bool enableMeshUpdate = false;
 
     VkPhysicalDeviceDescriptorIndexingFeaturesEXT desc_indexing;
 
@@ -571,13 +574,8 @@ public:
 
     void updateUniformBuffers()
     {
-        uboVS.projection = glm::perspective(glm::radians(60.0f), (float)width / (float)height, 0.1f, 256.0f);
-        glm::mat4 viewMatrix = camera.matrices.view;
-
-        uboVS.model = viewMatrix;/* * glm::translate(glm::mat4(1.0f), cameraPos);
-        uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-        uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-        uboVS.model = glm::rotate(uboVS.model, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));*/
+        uboVS.projection = cameraController.getProjection();
+        uboVS.model = cameraController.getView();
 
         memcpy(uniformBuffers.scene.mapped, &uboVS, sizeof(uboVS));
     }
@@ -643,6 +641,7 @@ public:
 
         //Get extension functions
         CHECK_RPR(rprContextGetFunctionPtr(context_, RPR_CONTEXT_FLUSH_FRAMEBUFFERS_FUNC_NAME, (void**)(&rprContextFlushFrameBuffers)));
+        CHECK_RPR(rprContextGetFunctionPtr(context_, RPR_MESH_UPDATE_FUNC_NAME, (void**)(&rprMeshUpdate)));
 
         //Create material system
         CHECK_RPR(rprContextCreateMaterialSystem(context_, 0, &mat_system_));
@@ -730,7 +729,7 @@ public:
         //Create basic material
         CHECK_RPR(rprMaterialSystemCreateNode(mat_system_, RPR_MATERIAL_NODE_UBERV2, &base_material_));
         CHECK_RPR(rprMaterialNodeSetInputUByKey(base_material_, RPR_UBER_MATERIAL_LAYERS, RPR_UBER_MATERIAL_LAYER_DIFFUSE));
-        CHECK_RPR(rprMaterialNodeSetInputFByKey(base_material_, RPR_MATERIAL_INPUT_UBER_DIFFUSE_COLOR, 0.8f, 0.8f, 0.8f, 1.0f));
+        CHECK_RPR(rprMaterialNodeSetInputFByKey(base_material_, RPR_MATERIAL_INPUT_UBER_DIFFUSE_COLOR, 0.3f, 0.5f, 0.3f, 1.0f));
         CHECK_RPR(rprShapeSetMaterial(mesh_, base_material_));
 
         CHECK_RPR(rprSceneAttachShape(scene_, mesh_));
@@ -739,17 +738,30 @@ public:
         CHECK_RPR(rprContextSetScene(context_, scene_));
 
         //Init camera
-        CHECK_RPR(rprContextCreateCamera(context_, &camera_));
-        CHECK_RPR(rprCameraSetMode(camera_, RPR_CAMERA_MODE_PERSPECTIVE));
+        CHECK_RPR(rprContextCreateCamera(context_, &rprCamera));
+        CHECK_RPR(rprCameraSetMode(rprCamera, RPR_CAMERA_MODE_PERSPECTIVE));
 
-        camera.type = Camera::firstperson;
+        glm::vec3 eye = glm::vec3(-0.2f, 1.3f, 12.6f);
+        glm::vec3 up = glm::vec3(0.f, 1.f, 0.f);
+        glm::vec3 at = glm::vec3(-0.2f, 1.3f, 5.6f);
 
-        camera.setPosition(glm::vec3(-0.2f, 1.3f, 12.6f));
+        glm::vec2 sensor_size(0.036f, 0.024f);
+        float focal_length = 0.035f;
 
-        CHECK_RPR(rprCameraSetTransform(camera_, false, (float*)&(camera.matrices.view)));
+        const float fovy = atan(sensor_size.y / (2.0f * focal_length));
+        const float aspect = sensor_size.x / sensor_size.y;
 
-        CHECK_RPR(rprCameraSetSensorSize(camera_, 36.f, 24.f)); //Standart 36x24 sensor
-        CHECK_RPR(rprSceneSetCamera(scene_, camera_));
+        cameraController.setPerspective(fovy, aspect, 0.1f, 10000.f);
+        cameraController.LookAt(eye, at, up);
+
+        CHECK_RPR(rprCameraLookAt(rprCamera,
+            eye.x, eye.y, eye.z,
+            at.x, at.y, at.z,
+            up.x, up.y, up.z));
+
+        CHECK_RPR(rprCameraSetSensorSize(rprCamera, sensor_size.x * 1000.f, sensor_size.y * 1000.f)); //Standart 36x24 sensor
+        CHECK_RPR(rprSceneSetCamera(scene_, rprCamera));
+
 
         rpr_light env_light = nullptr;
         CHECK_RPR(rprContextCreateEnvironmentLight(context_, &env_light));
@@ -844,6 +856,47 @@ public:
         prepared = true;
     }
 
+    void updateMesh()
+    {
+        static float z_delta = 0.5f;
+        static float zdd = 0.01f;
+        float x_step = 1.f / (float)x_size;
+        float y_step = 1.f / (float)y_size;
+
+        //Modify vertices
+        for (std::size_t y = 0; y < y_size; ++y)
+        {
+            for (std::size_t x = 0; x < x_size; ++x)
+            {
+                float z = 1.f * sin(x_step * x * y_step * y * z_delta);
+                vertices_data[y * x_size + x].position = glm::vec4(x_step * x, z, y_step * y, 1.0f);
+                vertices_data[y * x_size + x].normal = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+                vertices_data[y * x_size + x].uv0 = glm::vec2(x_step * x, y_step * y);
+                vertices_data[y * x_size + x].uv1 = glm::vec2(0.0f, 0.0f);
+            }
+        }
+
+        if (z_delta > 10) zdd = -zdd;
+        else if (z_delta < 0.01) zdd = -zdd;
+        z_delta += zdd;
+
+        //Fill update data
+        DataChange vertex_changes;
+        vertex_changes.stride = sizeof(Vertex);
+        vertex_changes.src_offset = 0;
+        vertex_changes.first_vertex = 0;
+        vertex_changes.vertex_count = x_size * y_size;
+
+        //Update all vertices
+        CHECK_RPR(rprMeshUpdate(mesh_, (float*)vertices_data.data(), &vertex_changes, 1, x_size * y_size * sizeof(Vertex),
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0));
+
+        //Mesh update requires framebuffer clear
+        CHECK_RPR(rprFrameBufferClear(color_framebuffer_));
+    }
+
     virtual void render()
     {
         if (!prepared)
@@ -855,7 +908,7 @@ public:
         CHECK_RPR(rprContextGetInfo(context_, RPR_CONTEXT_INTEROP_SEMAPHORE_INDEX,
             sizeof(semaphore_index_), &semaphore_index_, nullptr));
 
-        if (camera.updated)
+        if (cameraController.updated)
         {
             updateUniformBuffers();
         }
@@ -867,11 +920,22 @@ public:
         }
 
         draw();
+
+        if (enableMeshUpdate)
+        {
+            updateMesh();
+        }
+
     }
 
     virtual void viewChanged()
     {
-        CHECK_RPR(rprCameraSetTransform(camera_, false, (float*)&(camera.matrices.view)));
+        auto pos = cameraController.camera->GetPosition();
+        auto up = cameraController.camera->GetUpVector();
+        auto at = cameraController.camera->GetAt();
+
+        CHECK_RPR(rprCameraLookAt(rprCamera,
+            pos.x, pos.y, pos.z, at.x, at.y, at.z, up.x, up.y, up.z));
 
         CHECK_RPR(rprFrameBufferClear(color_framebuffer_));
     }
@@ -892,6 +956,7 @@ public:
             }
 
             overlay->checkBox("Wireframe", &wireframe);
+            overlay->checkBox("Enable mesh update", &enableMeshUpdate);
         }
     }
 };

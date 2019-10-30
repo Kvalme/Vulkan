@@ -51,7 +51,7 @@
 #include "VulkanInitializers.hpp"
 #include "VulkanDevice.hpp"
 #include "VulkanSwapChain.hpp"
-#include "camera.hpp"
+#include "cameracontroller.hpp"
 #include "benchmark.hpp"
 
 class VulkanExampleBase
@@ -174,7 +174,7 @@ public:
 	// Use to adjust mouse zoom speed
 	float zoomSpeed = 1.0f;
 
-	Camera camera;
+	CameraController cameraController;
 
 	glm::vec3 rotation = glm::vec3();
 	glm::vec3 cameraPos = glm::vec3();

@@ -255,8 +255,8 @@ void VulkanExampleBase::renderFrame()
 	auto tEnd = std::chrono::high_resolution_clock::now();
 	auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
 	frameTimer = (float)tDiff / 1000.0f;
-	camera.update(frameTimer);
-	if (camera.moving())
+	cameraController.update(frameTimer);
+    if (cameraController.moving())
 	{
 		viewUpdated = true;
 	}
@@ -357,7 +357,7 @@ void VulkanExampleBase::renderLoop()
 			auto tEnd = std::chrono::high_resolution_clock::now();
 			auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
 			frameTimer = tDiff / 1000.0f;
-			camera.update(frameTimer);
+			cameraController.update(frameTimer);
 			// Convert to clamped timer value
 			if (!paused)
 			{
@@ -385,7 +385,7 @@ void VulkanExampleBase::renderLoop()
 				touchTimer += frameTimer;
 			}
 			if (touchTimer >= 1.0) {
-				camera.keys.up = true;
+				cameraController.keys.up = true;
 				viewChanged();
 			}
 
@@ -393,19 +393,19 @@ void VulkanExampleBase::renderLoop()
 			const float deadZone = 0.0015f;
 			// todo : check if gamepad is present
 			// todo : time based and relative axis positions
-			if (camera.type != Camera::CameraType::firstperson)
+			if (cameraController.type != Camera::CameraType::firstperson)
 			{
 				// Rotate
 				if (std::abs(gamePadState.axisLeft.x) > deadZone)
 				{
 					rotation.y += gamePadState.axisLeft.x * 0.5f * rotationSpeed;
-					camera.rotate(glm::vec3(0.0f, gamePadState.axisLeft.x * 0.5f, 0.0f));
+					cameraController.rotate(glm::vec3(0.0f, gamePadState.axisLeft.x * 0.5f, 0.0f));
 					updateView = true;
 				}
 				if (std::abs(gamePadState.axisLeft.y) > deadZone)
 				{
 					rotation.x -= gamePadState.axisLeft.y * 0.5f * rotationSpeed;
-					camera.rotate(glm::vec3(gamePadState.axisLeft.y * 0.5f, 0.0f, 0.0f));
+					cameraController.rotate(glm::vec3(gamePadState.axisLeft.y * 0.5f, 0.0f, 0.0f));
 					updateView = true;
 				}
 				// Zoom
@@ -421,7 +421,7 @@ void VulkanExampleBase::renderLoop()
 			}
 			else
 			{
-				updateView = camera.updatePad(gamePadState.axisLeft, gamePadState.axisRight, frameTimer);
+				updateView = cameraController.updatePad(gamePadState.axisLeft, gamePadState.axisRight, frameTimer);
 				if (updateView)
 				{
 					viewChanged();
@@ -443,8 +443,8 @@ void VulkanExampleBase::renderLoop()
 		auto tEnd = std::chrono::high_resolution_clock::now();
 		auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
 		frameTimer = tDiff / 1000.0f;
-		camera.update(frameTimer);
-		if (camera.moving())
+		cameraController.update(frameTimer);
+		if (cameraController.moving())
 		{
 			viewUpdated = true;
 		}
@@ -489,8 +489,8 @@ void VulkanExampleBase::renderLoop()
 		auto tEnd = std::chrono::high_resolution_clock::now();
 		auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
 		frameTimer = tDiff / 1000.0f;
-		camera.update(frameTimer);
-		if (camera.moving())
+		cameraController.update(frameTimer);
+		if (cameraController.moving())
 		{
 			viewUpdated = true;
 		}
@@ -538,8 +538,8 @@ void VulkanExampleBase::renderLoop()
 		auto tEnd = std::chrono::high_resolution_clock::now();
 		auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
 		frameTimer = tDiff / 1000.0f;
-		camera.update(frameTimer);
-		if (camera.moving())
+        cameraController.update(frameTimer);
+        if (cameraController.moving())
 		{
 			viewUpdated = true;
 		}
@@ -1178,21 +1178,21 @@ void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 			break;
 		}
 
-		if (camera.firstperson)
+		if (cameraController.firstperson)
 		{
 			switch (wParam)
 			{
 			case KEY_W:
-				camera.keys.up = true;
+				cameraController.keys.up = true;
 				break;
 			case KEY_S:
-				camera.keys.down = true;
+				cameraController.keys.down = true;
 				break;
 			case KEY_A:
-				camera.keys.left = true;
+				cameraController.keys.left = true;
 				break;
 			case KEY_D:
-				camera.keys.right = true;
+				cameraController.keys.right = true;
 				break;
 			}
 		}
@@ -1200,21 +1200,21 @@ void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 		keyPressed((uint32_t)wParam);
 		break;
 	case WM_KEYUP:
-		if (camera.firstperson)
+		if (cameraController.firstperson)
 		{
 			switch (wParam)
 			{
 			case KEY_W:
-				camera.keys.up = false;
+				cameraController.keys.up = false;
 				break;
 			case KEY_S:
-				camera.keys.down = false;
+				cameraController.keys.down = false;
 				break;
 			case KEY_A:
-				camera.keys.left = false;
+				cameraController.keys.left = false;
 				break;
 			case KEY_D:
-				camera.keys.right = false;
+				cameraController.keys.right = false;
 				break;
 			}
 		}
@@ -1244,7 +1244,7 @@ void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 	{
 		short wheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
 		zoom += (float)wheelDelta * 0.005f * zoomSpeed;
-		camera.translate(glm::vec3(0.0f, 0.0f, (float)wheelDelta * 0.005f * zoomSpeed));
+		cameraController.translate(glm::vec3(0.0f, 0.0f, (float)wheelDelta * 0.005f * zoomSpeed));
 		viewUpdated = true;
 		break;
 	}
@@ -1300,7 +1300,7 @@ int32_t VulkanExampleBase::handleAppInput(struct android_app* app, AInputEvent* 
 						vulkanExample->touchPos.y = AMotionEvent_getY(event, 0);
 						vulkanExample->touchTimer = 0.0;
 						vulkanExample->touchDown = false;
-						vulkanExample->camera.keys.up = false;
+						vulkanExample->cameraController.keys.up = false;
 
 						// Detect single tap
 						int64_t eventTime = AMotionEvent_getEventTime(event);
@@ -1351,8 +1351,8 @@ int32_t VulkanExampleBase::handleAppInput(struct android_app* app, AInputEvent* 
 							float deltaX = (float)(vulkanExample->touchPos.y - eventY) * vulkanExample->rotationSpeed * 0.5f;
 							float deltaY = (float)(vulkanExample->touchPos.x - eventX) * vulkanExample->rotationSpeed * 0.5f;
 
-							vulkanExample->camera.rotate(glm::vec3(deltaX, 0.0f, 0.0f));
-							vulkanExample->camera.rotate(glm::vec3(0.0f, -deltaY, 0.0f));
+							vulkanExample->cameraController.rotate(glm::vec3(deltaX, 0.0f, 0.0f));
+							vulkanExample->cameraController.rotate(glm::vec3(0.0f, -deltaY, 0.0f));
 
 							vulkanExample->rotation.x += deltaX;
 							vulkanExample->rotation.y -= deltaY;
@@ -1551,7 +1551,7 @@ void VulkanExampleBase::pointerAxis(wl_pointer *pointer, uint32_t time,
 	{
 	case REL_X:
 		zoom += d * 0.005f * zoomSpeed;
-		camera.translate(glm::vec3(0.0f, 0.0f, d * 0.005f * zoomSpeed));
+		cameraController.translate(glm::vec3(0.0f, 0.0f, d * 0.005f * zoomSpeed));
 		viewUpdated = true;
 		break;
 	default:
@@ -1590,16 +1590,16 @@ void VulkanExampleBase::keyboardKey(struct wl_keyboard *keyboard,
 	switch (key)
 	{
 	case KEY_W:
-		camera.keys.up = !!state;
+		cameraController.keys.up = !!state;
 		break;
 	case KEY_S:
-		camera.keys.down = !!state;
+		cameraController.keys.down = !!state;
 		break;
 	case KEY_A:
-		camera.keys.left = !!state;
+		cameraController.keys.left = !!state;
 		break;
 	case KEY_D:
-		camera.keys.right = !!state;
+		cameraController.keys.right = !!state;
 		break;
 	case KEY_P:
 		if (state)
@@ -1930,16 +1930,16 @@ void VulkanExampleBase::handleEvent(const xcb_generic_event_t *event)
 		switch (keyEvent->detail)
 		{
 			case KEY_W:
-				camera.keys.up = true;
+                cameraController.keys.up = true;
 				break;
 			case KEY_S:
-				camera.keys.down = true;
+                cameraController.keys.down = true;
 				break;
 			case KEY_A:
-				camera.keys.left = true;
+                cameraController.keys.left = true;
 				break;
 			case KEY_D:
-				camera.keys.right = true;
+                cameraController.keys.right = true;
 				break;
 			case KEY_P:
 				paused = !paused;
@@ -1958,16 +1958,16 @@ void VulkanExampleBase::handleEvent(const xcb_generic_event_t *event)
 		switch (keyEvent->detail)
 		{
 			case KEY_W:
-				camera.keys.up = false;
+                cameraController.keys.up = false;
 				break;
 			case KEY_S:
-				camera.keys.down = false;
+                cameraController.keys.down = false;
 				break;
 			case KEY_A:
-				camera.keys.left = false;
+                cameraController.keys.left = false;
 				break;
 			case KEY_D:
-				camera.keys.right = false;
+                cameraController.keys.right = false;
 				break;			
 			case KEY_ESCAPE:
 				quit = true;
@@ -2211,7 +2211,7 @@ void VulkanExampleBase::windowResize()
 	vkDeviceWaitIdle(device);
 
 	if ((width > 0.0f) && (height > 0.0f)) {
-		camera.updateAspectRatio((float)width / (float)height);
+		cameraController.updateAspectRatio((float)width / (float)height);
 	}
 
 	// Notify derived class
@@ -2240,20 +2240,20 @@ void VulkanExampleBase::handleMouseMove(int32_t x, int32_t y)
 	}
 
 	if (mouseButtons.left) {
-		rotation.x += dy * 1.25f * rotationSpeed;
-		rotation.y -= dx * 1.25f * rotationSpeed;
-		camera.rotate(glm::vec3(dy * camera.rotationSpeed, -dx * camera.rotationSpeed, 0.0f));
+		rotation.x += dy * rotationSpeed;
+		rotation.y -= dx * rotationSpeed;
+		cameraController.rotate(glm::vec3(dy * cameraController.rotationSpeed, -dx * cameraController.rotationSpeed, 0.0f));
 		viewUpdated = true;
 	}
 	if (mouseButtons.right) {
 		zoom += dy * .005f * zoomSpeed;
-		camera.translate(glm::vec3(-0.0f, 0.0f, dy * .005f * zoomSpeed));
+		cameraController.translate(glm::vec3(-0.0f, 0.0f, dy * .005f * zoomSpeed));
 		viewUpdated = true;
 	}
 	if (mouseButtons.middle) {
-		cameraPos.x -= dx * 0.01f;
-		cameraPos.y -= dy * 0.01f;
-		camera.translate(glm::vec3(-dx * 0.01f, -dy * 0.01f, 0.0f));
+		cameraController.position.x -= dx * 0.01f;
+		cameraController.position.y -= dy * 0.01f;
+		cameraController.translate(glm::vec3(-dx * 0.01f, -dy * 0.01f, 0.0f));
 		viewUpdated = true;
 	}
 	mousePos = glm::vec2((float)x, (float)y);

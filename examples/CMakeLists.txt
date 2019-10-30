@@ -54,6 +54,7 @@ set(EXAMPLES
     rpr_edit
     rpr_wireframe
     rpr_gizmo
+    rpr_basic_shade
 )
 
 buildExamples()

@@ -709,6 +709,18 @@ public:
             bbox shape_aabb;
             CHECK_RPR(rprMeshGetInfo(shape, RPR_MESH_AABB, sizeof(shape_aabb), &shape_aabb, nullptr));
             gizmo.shape_aabbs.push_back(shape_aabb);
+
+            {
+                // Rotate each shape a bit.
+
+                glm::mat4 shape_transform;
+                CHECK_RPR(rprShapeGetInfo(shape, RPR_SHAPE_TRANSFORM,
+                    sizeof(glm::mat4), &shape_transform, nullptr));
+
+                shape_transform = glm::rotate(shape_transform, 0.4f, { 1, 1, 1 });
+
+                CHECK_RPR(rprShapeSetTransform(shape, false, reinterpret_cast<const rpr_float*>(&shape_transform)));
+            }
         }
     }
 
@@ -930,19 +942,6 @@ public:
         }
 
         draw();
-
-        if (gizmo.selected_object_index != gizmo.kNoObjectIndex)
-        {
-            rpr_shape shape = gizmo.shapes[gizmo.selected_object_index - 1];
-            glm::mat4 shape_transform;
-            CHECK_RPR(rprShapeGetInfo(shape, RPR_SHAPE_TRANSFORM,
-                sizeof(glm::mat4), &shape_transform, nullptr));
-
-            shape_transform = glm::translate(shape_transform, glm::vec3(0.005f, 0.0f, 0.0f));
-            shape_transform = glm::rotate(shape_transform, 0.01f, { 1, 1, 1 });
-
-            //CHECK_RPR(rprShapeSetTransform(shape, false, reinterpret_cast<const rpr_float*>(&shape_transform)));
-        }
     }
 
     virtual void viewChanged()
@@ -1092,28 +1091,33 @@ public:
 
             glm::mat4 move_transform;
 
-            float move_value = gizmo.ubo.scale * glm::dot(gizmo.screen_move_direction, mouseDelta) * 0.01f;
+            constexpr float kMoveScale = 0.01f;
+            float move_value = kMoveScale * gizmo.ubo.scale * glm::dot(gizmo.screen_move_direction, mouseDelta);
 
-            if (!gizmo.is_local)
+            switch (gizmo.selected_axis)
             {
-                switch (gizmo.selected_axis)
-                {
-                case 0:
-                    move_transform = glm::translate({}, glm::vec3(-move_value, 0.0f, 0.0f));
-                    break;
-                case 1:
-                    move_transform = glm::translate({}, glm::vec3(0.0f, -move_value, 0.0f));
-                    break;
-                case 2:
-                    move_transform = glm::translate({}, glm::vec3(0.0f, 0.0f, -move_value));
-                    break;
-                default:
-                    break;
-                }
+            case 0:
+                move_transform = glm::translate({}, glm::vec3(-move_value, 0.0f, 0.0f));
+                break;
+            case 1:
+                move_transform = glm::translate({}, glm::vec3(0.0f, -move_value, 0.0f));
+                break;
+            case 2:
+                move_transform = glm::translate({}, glm::vec3(0.0f, 0.0f, -move_value));
+                break;
+            default:
+                break;
             }
-            
-            shape_transform = move_transform * shape_transform;
 
+            if (gizmo.is_local)
+            {
+                shape_transform = shape_transform * move_transform;
+            }
+            else
+            {
+                shape_transform = move_transform * shape_transform;
+            }
+ 
             CHECK_RPR(rprShapeSetTransform(shape, false, reinterpret_cast<const rpr_float*>(&shape_transform)));
 
             handled = true;

@@ -28,7 +28,7 @@
 #include "Rpr/RadeonProRender_VK.h"
 #include "Rpr/RadeonProRenderIO.h"
 
-#include "rpr/Math/mathutils.h"
+#include "Rpr/Math/mathutils.h"
 
 #define VERTEX_BUFFER_BIND_ID 0
 #define ENABLE_VALIDATION true
@@ -117,7 +117,7 @@ public:
         }
     };
 
-    struct // Gizmo related stuff.
+    struct GismoInfo // Gizmo related stuff.
     {
         static constexpr std::int32_t kNoObjectIndex = 0;
 

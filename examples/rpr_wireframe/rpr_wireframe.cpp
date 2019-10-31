@@ -766,7 +766,7 @@ public:
         rpr_light env_light = nullptr;
         CHECK_RPR(rprContextCreateEnvironmentLight(context_, &env_light));
         rpr_image image = nullptr;
-        CHECK_RPR(rprContextCreateImageFromFile(context_, getAssetPath() + "/textures/hdr/studio015.hdr", &image));
+        CHECK_RPR(rprContextCreateImageFromFile(context_, (getAssetPath() + "/textures/hdr/studio015.hdr").c_str(), &image));
         CHECK_RPR(rprEnvironmentLightSetImage(env_light, image));
         CHECK_RPR(rprSceneSetEnvironmentLight(scene_, env_light));
 

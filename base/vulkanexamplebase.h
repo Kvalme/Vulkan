@@ -179,6 +179,7 @@ public:
 	glm::vec3 rotation = glm::vec3();
 	glm::vec3 cameraPos = glm::vec3();
 	glm::vec2 mousePos;
+	glm::vec2 mouseDelta;
 
 	std::string title = "Vulkan Example";
 	std::string name = "vulkanExample";
@@ -328,8 +329,12 @@ public:
 	virtual void viewChanged();
 	/** @brief (Virtual) Called after a key was pressed, can be used to do custom key handling */
 	virtual void keyPressed(uint32_t);
-	/** @brief (Virtual) Called after th mouse cursor moved and before internal events (like camera rotation) is handled */
+	/** @brief (Virtual) Called after the mouse cursor moved and before internal events (like camera rotation) is handled */
 	virtual void mouseMoved(double x, double y, bool &handled);
+    /** @brief (Virtual) Called after mouse buttons were pressed and before internal events (like camera rotation) is handled */
+    virtual void mousePressed(double x, double y, bool &handled);
+    /** @brief (Virtual) Called after mouse buttons were released and before internal events (like camera rotation) is handled */
+    virtual void mouseReleased(double x, double y, bool &handled);
 	// Called when the window has been resized
 	// Can be overriden in derived class to recreate or rebuild resources attached to the frame buffer / swapchain
 	virtual void windowResized();

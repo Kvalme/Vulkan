@@ -28,7 +28,7 @@
 #include "Rpr/RadeonProRender_VK.h"
 #include "Rpr/RadeonProRenderIO.h"
 
-#include "rpr/Math/math_utils.h"
+#include "rpr/Math/mathutils.h"
 
 #define VERTEX_BUFFER_BIND_ID 0
 #define ENABLE_VALIDATION true
@@ -106,6 +106,17 @@ public:
 
     VkPhysicalDeviceDescriptorIndexingFeaturesEXT desc_indexing;
 
+    struct bbox
+    {
+        RadeonProRender::float3 pmin;
+        RadeonProRender::float3 pmax;
+
+        RadeonProRender::float3 center() const
+        {
+            return (pmin + pmax) * 0.5f;
+        }
+    };
+
     struct // Gizmo related stuff.
     {
         static constexpr std::int32_t kNoObjectIndex = 0;
@@ -116,7 +127,7 @@ public:
         bool is_local = false;
 
         std::vector<rpr_shape> shapes;
-        std::vector<RadeonProRender::bbox> shape_aabbs;
+        std::vector<bbox> shape_aabbs;
 
         struct // Pipeline.
         {
@@ -131,14 +142,18 @@ public:
             glm::mat4 model;
             glm::mat4 view;
             glm::mat4 projection;
-            std::int32_t is_visible;
+            std::uint32_t is_visible = 0;
             float scale = 1.0f;
         } ubo;
 
         vks::Buffer ubo_buffer;
         bool ubo_need_update = false;
 
-        bool active() const { return selected_object_index != kNoObjectIndex; }
+        bool active() const 
+        { 
+            return selected_object_index != kNoObjectIndex &&
+                (selected_object_index - 1) < shapes.size();
+        }
 
     } gizmo;
 
@@ -256,7 +271,7 @@ public:
         gizmo.ubo.projection = cameraController.getProjection();
         gizmo.ubo.view = cameraController.getView();
 
-        if (gizmo.selected_object_index - 1 < gizmo.shapes.size())
+        if (gizmo.active())
         {
             rpr_shape shape = gizmo.shapes[gizmo.selected_object_index - 1];
             glm::mat4 shape_transform;
@@ -686,7 +701,7 @@ public:
             }
 
             // Get aabb of the shape.
-            RadeonProRender::bbox shape_aabb;
+            bbox shape_aabb;
             CHECK_RPR(rprMeshGetInfo(shape, RPR_MESH_AABB, sizeof(shape_aabb), &shape_aabb, nullptr));
             gizmo.shape_aabbs.push_back(shape_aabb);
         }

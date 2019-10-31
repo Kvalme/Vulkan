@@ -1152,6 +1152,8 @@ HWND VulkanExampleBase::setupWindow(HINSTANCE hinstance, WNDPROC wndproc)
 
 void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+    bool handled = false;
+
 	switch (uMsg)
 	{
 	case WM_CLOSE:
@@ -1222,23 +1224,29 @@ void VulkanExampleBase::handleMessages(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 	case WM_LBUTTONDOWN:
 		mousePos = glm::vec2((float)LOWORD(lParam), (float)HIWORD(lParam));
 		mouseButtons.left = true;
+        mousePressed(mousePos.x, mousePos.y, handled);
 		break;
 	case WM_RBUTTONDOWN:
 		mousePos = glm::vec2((float)LOWORD(lParam), (float)HIWORD(lParam));
 		mouseButtons.right = true;
+        mousePressed(mousePos.x, mousePos.y, handled);
 		break;
 	case WM_MBUTTONDOWN:
 		mousePos = glm::vec2((float)LOWORD(lParam), (float)HIWORD(lParam));
 		mouseButtons.middle = true;
+        mousePressed(mousePos.x, mousePos.y, handled);
 		break;
 	case WM_LBUTTONUP:
 		mouseButtons.left = false;
+        mouseReleased(mousePos.x, mousePos.y, handled);
 		break;
 	case WM_RBUTTONUP:
 		mouseButtons.right = false;
+        mouseReleased(mousePos.x, mousePos.y, handled);
 		break;
 	case WM_MBUTTONUP:
 		mouseButtons.middle = false;
+        mouseReleased(mousePos.x, mousePos.y, handled);
 		break;
 	case WM_MOUSEWHEEL:
 	{
@@ -2003,7 +2011,11 @@ void VulkanExampleBase::viewChanged() {}
 
 void VulkanExampleBase::keyPressed(uint32_t) {}
 
-void VulkanExampleBase::mouseMoved(double x, double y, bool & handled) {}
+void VulkanExampleBase::mouseMoved(double x, double y, bool& handled) {}
+
+void VulkanExampleBase::mousePressed(double x, double y, bool& handled) {}
+
+void VulkanExampleBase::mouseReleased(double x, double y, bool& handled) {}
 
 void VulkanExampleBase::buildCommandBuffers() {}
 
@@ -2232,7 +2244,10 @@ void VulkanExampleBase::handleMouseMove(int32_t x, int32_t y)
 		ImGuiIO& io = ImGui::GetIO();
 		handled = io.WantCaptureMouse;
 	}
-	mouseMoved((float)x, (float)y, handled);
+
+    mouseDelta = glm::vec2(float(dx), float(dy));
+
+	mouseMoved((double)x, (double)y, handled);
 
 	if (handled) {
 		mousePos = glm::vec2((float)x, (float)y);

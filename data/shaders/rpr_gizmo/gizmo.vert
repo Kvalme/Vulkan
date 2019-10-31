@@ -16,7 +16,7 @@ layout (binding = 0) uniform UBO
 	mat4 model;
     mat4 view;
 	mat4 projection;
-    int is_visible;
+    uint is_visible;
     float scale;
 } ubo;
 

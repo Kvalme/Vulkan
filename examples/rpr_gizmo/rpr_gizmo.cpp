@@ -149,6 +149,11 @@ public:
         vks::Buffer ubo_buffer;
         bool ubo_need_update = false;
 
+        // [0, 1, 2]
+        std::int32_t selected_axis = -1;
+
+        glm::vec2 screen_move_direction;
+
         bool active() const 
         { 
             return selected_object_index != kNoObjectIndex &&
@@ -936,8 +941,7 @@ public:
             shape_transform = glm::translate(shape_transform, glm::vec3(0.005f, 0.0f, 0.0f));
             shape_transform = glm::rotate(shape_transform, 0.01f, { 1, 1, 1 });
 
-            CHECK_RPR(rprShapeSetTransform(shape, false, 
-                reinterpret_cast<const rpr_float*>(&shape_transform)));
+            //CHECK_RPR(rprShapeSetTransform(shape, false, reinterpret_cast<const rpr_float*>(&shape_transform)));
         }
     }
 
@@ -1001,6 +1005,77 @@ public:
         }
     }
 
+    void mousePressed(double x, double y, bool &handled) override
+    {
+        if (!gizmo.active())
+        {
+            return;
+        }
+
+        if (mouseButtons.left)
+        {
+            // Define whether any of the gizmo axis was hitted.
+
+            glm::vec2 screen_pos = { float(x), float(y) };
+            glm::vec2 click_pos_ndc = (screen_pos / glm::vec2(width, height)) * 2.0f - glm::vec2(1.0f);
+
+            const glm::vec4 axis_verts[] =
+            { {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f} };
+
+            glm::vec4 axis_verts_projected[3];
+
+            auto origin_projected = gizmo.ubo.projection * gizmo.ubo.view * gizmo.ubo.model *
+                glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            origin_projected /= origin_projected.w;
+
+            float min_eps = FLT_MAX;
+
+            auto axis_index = 0u;
+            auto clicked_axis_index = ~0u;
+
+            for (const auto& axis_vert : axis_verts)
+            {
+                auto projected = gizmo.ubo.projection * gizmo.ubo.view * gizmo.ubo.model *
+                    (glm::vec4(gizmo.ubo.scale, gizmo.ubo.scale, gizmo.ubo.scale, 1.0f) * axis_vert);
+                projected /= projected.w;
+
+                axis_verts_projected[axis_index] = projected;
+
+                /*float eps = std::fabs((click_pos_ndc.x - origin_projected.x) / (projected.x - origin_projected.x) -
+                    (click_pos_ndc.y - origin_projected.y) / (projected.y - origin_projected.y));*/
+
+                float eps = std::sqrtf((click_pos_ndc.x - projected.x) * (click_pos_ndc.x - projected.x) +
+                    (click_pos_ndc.y - projected.y) * (click_pos_ndc.y - projected.y));
+
+                constexpr float kClickEps = 0.02f;
+                if (eps < kClickEps && eps < min_eps)
+                {
+                    min_eps = eps;
+                    clicked_axis_index = axis_index;
+                }
+
+                ++axis_index;
+            }
+
+            if (clicked_axis_index != ~0)
+            {
+                handled = true;
+
+                gizmo.selected_axis = clicked_axis_index;
+
+                gizmo.screen_move_direction = glm::vec2(
+                    axis_verts_projected[clicked_axis_index].x, axis_verts_projected[clicked_axis_index].y) -
+                    glm::vec2(origin_projected.x, origin_projected.y);
+                gizmo.screen_move_direction = glm::normalize(gizmo.screen_move_direction);
+            }
+        }
+    }
+
+    void mouseReleased(double x, double y, bool &handled) override
+    {
+        gizmo.selected_axis = -1;
+    }
+
     void mouseMoved(double x, double y, bool &handled) override
     {
         if (!mouseButtons.left || !gizmo.active())
@@ -1008,53 +1083,41 @@ public:
             return;
         }
 
-        // Define whether any of the gizmo axis was hitted.
-        
-        glm::vec2 screen_pos = { float(x), float(y) };
-        glm::vec2 click_pos_ndc = (screen_pos / glm::vec2(width, height)) * 2.0f - glm::vec2(1.0f);
-
-        const glm::vec4 basis_verts[] = 
-            { {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f} };
-
-        auto origin_projected = gizmo.ubo.projection * gizmo.ubo.view * gizmo.ubo.model * 
-            glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        origin_projected /= origin_projected.w;
-
-        float min_eps = FLT_MAX;
-
-        auto axis_index = 0u;
-        auto clicked_axis_index = ~0u;
-
-        for (const auto& basis_vert : basis_verts)
+        if (gizmo.selected_axis >= 0)
         {
-            auto basis_projected = gizmo.ubo.projection * gizmo.ubo.view * gizmo.ubo.model *
-                gizmo.ubo.scale * basis_vert;
-            basis_projected /= basis_projected.w;
+            rpr_shape shape = gizmo.shapes[gizmo.selected_object_index - 1];
+            glm::mat4 shape_transform;
+            CHECK_RPR(rprShapeGetInfo(shape, RPR_SHAPE_TRANSFORM,
+                sizeof(glm::mat4), &shape_transform, nullptr));
 
-            float eps = std::fabs((click_pos_ndc.x - origin_projected.x) / (basis_projected.x - origin_projected.x) -
-                (click_pos_ndc.y - origin_projected.y) / (basis_projected.y - origin_projected.y));
+            glm::mat4 move_transform;
 
-            constexpr float kClickEps = 0.2f;
-            if (eps < kClickEps && eps < min_eps)
+            float move_value = gizmo.ubo.scale * glm::dot(gizmo.screen_move_direction, mouseDelta) * 0.01f;
+
+            if (!gizmo.is_local)
             {
-                min_eps = eps;
-                clicked_axis_index = axis_index;
+                switch (gizmo.selected_axis)
+                {
+                case 0:
+                    move_transform = glm::translate({}, glm::vec3(-move_value, 0.0f, 0.0f));
+                    break;
+                case 1:
+                    move_transform = glm::translate({}, glm::vec3(0.0f, -move_value, 0.0f));
+                    break;
+                case 2:
+                    move_transform = glm::translate({}, glm::vec3(0.0f, 0.0f, -move_value));
+                    break;
+                default:
+                    break;
+                }
             }
+            
+            shape_transform = move_transform * shape_transform;
 
-            ++axis_index;
-        }
+            CHECK_RPR(rprShapeSetTransform(shape, false, reinterpret_cast<const rpr_float*>(&shape_transform)));
 
-        if (clicked_axis_index != ~0)
-        {
             handled = true;
-
-            const char labels[] = { 'X', 'Y', 'Z' };
-
-            std::cout << "Clicked: " << labels[axis_index] << ", eps = " << min_eps << std::endl;
         }
-        
-
-
     }
 };
 

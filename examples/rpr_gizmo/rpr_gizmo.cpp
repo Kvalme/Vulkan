@@ -1031,7 +1031,7 @@ public:
                 gizmo.ubo.scale * basis_vert;
             basis_projected /= basis_projected.w;
 
-            float eps = std::fabsf((click_pos_ndc.x - origin_projected.x) / (basis_projected.x - origin_projected.x) -
+            float eps = std::fabs((click_pos_ndc.x - origin_projected.x) / (basis_projected.x - origin_projected.x) -
                 (click_pos_ndc.y - origin_projected.y) / (basis_projected.y - origin_projected.y));
 
             constexpr float kClickEps = 0.2f;

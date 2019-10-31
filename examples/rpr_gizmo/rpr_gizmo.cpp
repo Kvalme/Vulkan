@@ -1043,7 +1043,7 @@ public:
                 /*float eps = std::fabs((click_pos_ndc.x - origin_projected.x) / (projected.x - origin_projected.x) -
                     (click_pos_ndc.y - origin_projected.y) / (projected.y - origin_projected.y));*/
 
-                float eps = std::sqrtf((click_pos_ndc.x - projected.x) * (click_pos_ndc.x - projected.x) +
+                float eps = std::sqrt((click_pos_ndc.x - projected.x) * (click_pos_ndc.x - projected.x) +
                     (click_pos_ndc.y - projected.y) * (click_pos_ndc.y - projected.y));
 
                 constexpr float kClickEps = 0.02f;

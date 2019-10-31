@@ -630,16 +630,9 @@ public:
         VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &info, VK_NULL_HANDLE));
         VK_CHECK_RESULT(vkQueueWaitIdle(queue));
 
-        RPRHybridKernelsPathInfo kernels_path_info
-        {
-            "../../BaikalNext/Kernels/VK",
-            "../../3rdparty/VidWrappers/radeonrays-next/shaders"
-        };
-
         rpr_context_properties properties[] =
         {
             (void*)RPR_CONTEXT_CREATEPROP_VK_INTEROP_INFO, &interop_info,
-            (void*)RPR_CONTEXT_CREATEPROP_HYBRID_KERNELS_PATH_INFO, &kernels_path_info,
             (void*)RPR_CONTEXT_CREATEPROP_HYBRID_ACC_MEMORY_SIZE, &acc_size_,
             (void*)RPR_CONTEXT_CREATEPROP_HYBRID_VERTEX_MEMORY_SIZE, &vbuf_size_,
             (void*)RPR_CONTEXT_CREATEPROP_HYBRID_INDEX_MEMORY_SIZE, &ibuf_size_,
@@ -710,7 +703,7 @@ public:
         rpr_light env_light = nullptr;
         CHECK_RPR(rprContextCreateEnvironmentLight(context_, &env_light));
         rpr_image image = nullptr;
-        CHECK_RPR(rprContextCreateImageFromFile(context_, "../../Resources/textures/ibl/studio015.hdr", &image));
+        CHECK_RPR(rprContextCreateImageFromFile(context_, "../data/textures/hdr/studio015.hdr", &image));
         CHECK_RPR(rprEnvironmentLightSetImage(env_light, image));
         CHECK_RPR(rprSceneSetEnvironmentLight(scene_, env_light));
 

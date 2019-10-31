@@ -1056,7 +1056,7 @@ public:
                 ++axis_index;
             }
 
-            if (clicked_axis_index != ~0)
+            if (clicked_axis_index != ~0u)
             {
                 handled = true;
 

@@ -1895,6 +1895,8 @@ void VulkanExampleBase::initxcbConnection()
 
 void VulkanExampleBase::handleEvent(const xcb_generic_event_t *event)
 {
+    bool handled = false;
+
 	switch (event->response_type & 0x7f)
 	{
 	case XCB_CLIENT_MESSAGE:
@@ -1919,6 +1921,8 @@ void VulkanExampleBase::handleEvent(const xcb_generic_event_t *event)
 			mouseButtons.middle = true;
 		if (press->detail == XCB_BUTTON_INDEX_3)
 			mouseButtons.right = true;
+
+        mousePressed(mousePos.x, mousePos.y, handled);
 	}
 	break;
 	case XCB_BUTTON_RELEASE:
@@ -1930,6 +1934,8 @@ void VulkanExampleBase::handleEvent(const xcb_generic_event_t *event)
 			mouseButtons.middle = false;
 		if (press->detail == XCB_BUTTON_INDEX_3)
 			mouseButtons.right = false;
+
+        mouseReleased(mousePos.x, mousePos.y, handled);
 	}
 	break;
 	case XCB_KEY_PRESS:

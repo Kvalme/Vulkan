@@ -1119,7 +1119,7 @@ public:
             }
  
             CHECK_RPR(rprShapeSetTransform(shape, false, reinterpret_cast<const rpr_float*>(&shape_transform)));
-
+            CHECK_RPR(rprFrameBufferClear(color_framebuffer_));
             handled = true;
         }
     }

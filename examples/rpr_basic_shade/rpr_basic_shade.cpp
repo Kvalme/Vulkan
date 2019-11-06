@@ -26,7 +26,6 @@
 #include "Rpr/RadeonProRender.h"
 #include "Rpr/RadeonProRender_Baikal.h"
 #include "Rpr/RadeonProRender_VK.h"
-#include "Rpr/RadeonProRenderIO.h"
 
 #define VERTEX_BUFFER_BIND_ID 0
 #define ENABLE_VALIDATION true
@@ -56,11 +55,8 @@ public:
         VkSampler sampler;
         VkImage image;
         VkImageLayout imageLayout;
-        VkDeviceMemory deviceMemory;
         VkImageView view;
-        uint32_t width, height;
-        uint32_t mipLevels;
-    } texture;
+    } color_aov, depth_aov;
 
     struct {
         VkPipelineVertexInputStateCreateInfo inputState;
@@ -81,6 +77,7 @@ public:
 
     struct {
         VkPipeline solid;
+		VkPipeline copy_depth;
         VkPipeline flat_shade;
     } pipelines;
 
@@ -88,8 +85,12 @@ public:
     VkDescriptorSet descriptorSet;
     VkDescriptorSetLayout descriptorSetLayout;
 
-	VkPipelineLayout flat_shade_pipeline_layout_;
-    VkDescriptorSetLayout flat_shade_descriptor_set_layout_;
+	VkPipelineLayout copyDepthPipelineLayout;
+    VkDescriptorSet copyDepthDescriptorSet;
+    VkDescriptorSetLayout copyDepthDescriptorSetLayout;
+
+	VkPipelineLayout flatShadePipelineLayout;
+    VkDescriptorSetLayout flatShadeDescriptorSetLayout;
 
     //Interop
     constexpr static std::uint32_t frames_in_flight_ = 3;
@@ -111,18 +112,24 @@ public:
 		rpr_material_node material = nullptr;
 		VkBuffer index_buffer = nullptr;
 		VkBuffer vertex_buffer = nullptr;
-		glm::mat4x4 transform = glm::mat4x4();
 		std::uint64_t polygon_count = 0;
 	};
 
-    rpr_context context_;
-    rpr_material_system mat_system_;
-    rpr_scene scene_;
+    rpr_context context_ = nullptr;
+    rpr_material_system mat_system_ = nullptr;
+    rpr_scene scene_ = nullptr;
 	std::vector<object_data> objects_;
-    rpr_framebuffer color_framebuffer_;
-    rpr_camera camera_;
-    std::uint32_t semaphore_index_;
+    rpr_framebuffer color_framebuffer_ = nullptr;
+	rpr_framebuffer depth_framebuffer_ = nullptr;
+    rpr_camera camera_ = nullptr;
 
+	struct
+	{
+		rpr_light light = nullptr;
+		rpr_image image = nullptr;
+	} env_light_;
+
+    std::uint32_t semaphore_index_;
     std::int32_t quality = 0;
 	std::int32_t shade_index_ = 0;
 
@@ -167,17 +174,35 @@ public:
 			rprObjectDelete(data.material);
 		}
 
+		rprObjectDelete(env_light_.light);
+		rprObjectDelete(env_light_.image);
         rprObjectDelete(scene_);
         rprObjectDelete(color_framebuffer_);
+        rprObjectDelete(depth_framebuffer_);
         rprObjectDelete(mat_system_);
+		rprObjectDelete(camera_);
         rprObjectDelete(context_);
 
-        destroyTextureImage(texture);
+        destroyTextureImage(color_aov);
+		destroyTextureImage(depth_aov);
 
         vkDestroyPipeline(device, pipelines.solid, nullptr);
+		vkDestroyPipeline(device, pipelines.copy_depth, nullptr);
+		vkDestroyPipeline(device, pipelines.flat_shade, nullptr);
 
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+
+		vkDestroyPipelineLayout(device, copyDepthPipelineLayout, nullptr);
+		vkDestroyDescriptorSetLayout(device, copyDepthDescriptorSetLayout, nullptr);
+
+		vkDestroyPipelineLayout(device, flatShadePipelineLayout, nullptr);
+		vkDestroyDescriptorSetLayout(device, flatShadeDescriptorSetLayout, nullptr);
+
+		for (std::uint32_t i = 0; i < frames_in_flight_; ++i)
+		{
+			vkDestroySemaphore(device, framebuffer_release_semaphores_[i], nullptr);
+		}
 
         vertexBuffer.destroy();
         indexBuffer.destroy();
@@ -197,24 +222,39 @@ public:
     void destroyTextureImage(Texture texture)
     {
         vkDestroyImageView(device, texture.view, nullptr);
-        vkDestroyImage(device, texture.image, nullptr);
         vkDestroySampler(device, texture.sampler, nullptr);
-        vkFreeMemory(device, texture.deviceMemory, nullptr);
-    }
-
-    void buildCommandBuffers()
-    {
-		for (std::uint32_t i = 0; i < drawCmdBuffers.size(); ++i)
-		{
-			rebuildCommandBuffer(i);
-		}
+        vkDestroyImage(device, texture.image, nullptr);
     }
 
 	void rebuildCommandBuffer(std::uint32_t const index)
     {
-		vkResetCommandBuffer(drawCmdBuffers[index], 0);
+		VkCommandBuffer& cmdBuffer = drawCmdBuffers[index];
+
+		vkResetCommandBuffer(cmdBuffer, 0);
 
         VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+
+        VK_CHECK_RESULT(vkBeginCommandBuffer(cmdBuffer, &cmdBufInfo));
+
+		{
+			VkImageMemoryBarrier barrier = vks::initializers::imageMemoryBarrier();
+
+			barrier.srcAccessMask = 0;
+			barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+			barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			barrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+			barrier.image = depthStencil.image;
+			barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+			barrier.subresourceRange.baseMipLevel = 0;
+			barrier.subresourceRange.levelCount = 1;
+			barrier.subresourceRange.baseArrayLayer = 0;
+			barrier.subresourceRange.layerCount = 1;
+
+			vkCmdPipelineBarrier(
+				cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, 0,
+				0, nullptr, 0, nullptr, 1, &barrier
+			);
+		}
 
         VkClearValue clearValues[2];
         clearValues[0].color = defaultClearColor;
@@ -232,51 +272,70 @@ public:
         // Set target frame buffer
         renderPassBeginInfo.framebuffer = frameBuffers[index];
 
-        VK_CHECK_RESULT(vkBeginCommandBuffer(drawCmdBuffers[index], &cmdBufInfo));
-
-        vkCmdBeginRenderPass(drawCmdBuffers[index], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(cmdBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
         VkViewport viewport = vks::initializers::viewport((float)width, (float)height, 0.0f, 1.0f);
-        vkCmdSetViewport(drawCmdBuffers[index], 0, 1, &viewport);
+        vkCmdSetViewport(cmdBuffer, 0, 1, &viewport);
 
         VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
-        vkCmdSetScissor(drawCmdBuffers[index], 0, 1, &scissor);
+        vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
-        vkCmdBindDescriptorSets(drawCmdBuffers[index], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, NULL);
-        vkCmdBindPipeline(drawCmdBuffers[index], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.solid);
+        vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, NULL);
+        vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.solid);
 
-        vkCmdDraw(drawCmdBuffers[index], 3, 1, 0, 0);
+        vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
 
 		if (shade_index_ != 0)
 		{
+			vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, copyDepthPipelineLayout, 0, 1, &copyDepthDescriptorSet, 0, NULL);
+			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.copy_depth);
+
+			struct
+			{
+				glm::vec2 projectionCoefficients;
+				float depthRange;
+			} copyDepthConstants;
+
+			glm::vec4 camera_pos;
+			glm::vec3 aabb[2];
+			CHECK_RPR(rprCameraGetInfo(camera_, RPR_CAMERA_POSITION, sizeof(glm::vec4), &camera_pos, nullptr));
+			CHECK_RPR(rprSceneGetInfo(scene_, RPR_SCENE_AABB, sizeof(glm::vec3) * 2, aabb, nullptr));
+
+			copyDepthConstants.projectionCoefficients = glm::vec2(cameraController.getProjection()[2][2], cameraController.getProjection()[3][2]);
+			copyDepthConstants.depthRange = glm::length(glm::vec3(camera_pos) - (aabb[1] - aabb[0])) + glm::length(aabb[1] - aabb[0]) * 2;
+
+			vkCmdPushConstants(cmdBuffer, copyDepthPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(copyDepthConstants), &copyDepthConstants);
+
+			vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
+
+
 			object_data const& data = objects_[shade_index_];
 
-			vkCmdBindDescriptorSets(drawCmdBuffers[index], VK_PIPELINE_BIND_POINT_GRAPHICS, flat_shade_pipeline_layout_, 0, 0, nullptr, 0, nullptr);
-			vkCmdBindPipeline(drawCmdBuffers[index], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.flat_shade);
+			vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.flat_shade);
 
-			vkCmdBindIndexBuffer(drawCmdBuffers[index], data.index_buffer, 0, VK_INDEX_TYPE_UINT32);
+			vkCmdBindIndexBuffer(cmdBuffer, data.index_buffer, 0, VK_INDEX_TYPE_UINT32);
 			VkDeviceSize offset = 0;
-			vkCmdBindVertexBuffers(drawCmdBuffers[index], 0, 1, &data.vertex_buffer, &offset);
+			vkCmdBindVertexBuffers(cmdBuffer, 0, 1, &data.vertex_buffer, &offset);
 
 			struct
 			{
 				glm::mat4 transform;
 				glm::vec4 color;
-			} constants;
+			} flatShadeConstants;
 
-			constants.transform = cameraController.getProjection() * cameraController.getView();
-			constants.color = glm::vec4(0.2f, 0.5f, 0.8f, 1.0f);
+			flatShadeConstants.transform = cameraController.getProjection() * cameraController.getView();
+			flatShadeConstants.color = glm::vec4(0.2f, 0.5f, 0.8f, 1.0f);
 
-			vkCmdPushConstants(drawCmdBuffers[index], flat_shade_pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(constants), &constants);
+			vkCmdPushConstants(cmdBuffer, flatShadePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(flatShadeConstants), &flatShadeConstants);
 
-			vkCmdDrawIndexed(drawCmdBuffers[index], data.polygon_count * 3, 1, 0, 0, 0);
+			vkCmdDrawIndexed(cmdBuffer, data.polygon_count * 3, 1, 0, 0, 0);
 		}
 
-        drawUI(drawCmdBuffers[index]);
+        drawUI(cmdBuffer);
 
-        vkCmdEndRenderPass(drawCmdBuffers[index]);
+        vkCmdEndRenderPass(cmdBuffer);
 
-        VK_CHECK_RESULT(vkEndCommandBuffer(drawCmdBuffers[index]));
+        VK_CHECK_RESULT(vkEndCommandBuffer(cmdBuffer));
     }
 
     void draw()
@@ -332,7 +391,7 @@ public:
         // Example uses one ubo and one image sampler
         std::vector<VkDescriptorPoolSize> poolSizes =
         {
-            vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1)
+            vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2)
         };
 
         VkDescriptorPoolCreateInfo descriptorPoolInfo =
@@ -370,10 +429,43 @@ public:
 		}
 
 		{
+			std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings =
+			{
+				vks::initializers::descriptorSetLayoutBinding(
+					VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					VK_SHADER_STAGE_FRAGMENT_BIT,
+					0
+				)
+			};
+
+			VkDescriptorSetLayoutCreateInfo descriptorLayout =
+			vks::initializers::descriptorSetLayoutCreateInfo(
+				setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
+
+			VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &copyDepthDescriptorSetLayout));
+
+			VkPushConstantRange pushConstants =
+				vks::initializers::pushConstantRange(
+					VK_SHADER_STAGE_FRAGMENT_BIT,
+					sizeof(glm::vec2) + sizeof(float),
+					0);
+
+			VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
+			vks::initializers::pipelineLayoutCreateInfo(
+				&copyDepthDescriptorSetLayout,
+				1);
+
+			pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstants;
+			pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+
+			VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &copyDepthPipelineLayout));
+		}
+
+		{
 			VkDescriptorSetLayoutCreateInfo descriptorLayout =
 			vks::initializers::descriptorSetLayoutCreateInfo(nullptr, 0);
 
-			VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &flat_shade_descriptor_set_layout_));
+			VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &flatShadeDescriptorSetLayout));
 
 			VkPushConstantRange pushConstants =
 				vks::initializers::pushConstantRange(
@@ -383,44 +475,65 @@ public:
 
 			VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
 			vks::initializers::pipelineLayoutCreateInfo(
-				&flat_shade_descriptor_set_layout_,
+				&flatShadeDescriptorSetLayout,
 				1);
 
 			pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstants;
 			pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
 
-			VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &flat_shade_pipeline_layout_));
+			VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &flatShadePipelineLayout));
 		}
     }
 
     void setupDescriptorSet()
     {
-        VkDescriptorSetAllocateInfo allocInfo =
-        vks::initializers::descriptorSetAllocateInfo(
-            descriptorPool,
-            &descriptorSetLayout,
-            1);
+		{
+			VkDescriptorSetAllocateInfo allocInfo =
+			vks::initializers::descriptorSetAllocateInfo(
+				descriptorPool,
+				&descriptorSetLayout,
+				1);
 
-        VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
+			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
+		}
 
-        // Setup a descriptor image info for the current texture to be used as a combined image sampler
-        VkDescriptorImageInfo textureDescriptor;
-        textureDescriptor.imageView = texture.view;				// The image's view (images are never directly accessed by the shader, but rather through views defining subresources)
-        textureDescriptor.sampler = texture.sampler;			// The sampler (Telling the pipeline how to sample the texture, including repeat, border, etc.)
-        textureDescriptor.imageLayout = texture.imageLayout;	// The current layout of the image (Note: Should always fit the actual use, e.g. shader read)
+		{
+			VkDescriptorSetAllocateInfo allocInfo =
+			vks::initializers::descriptorSetAllocateInfo(
+				descriptorPool,
+				&copyDepthDescriptorSetLayout,
+				1);
 
-        std::vector<VkWriteDescriptorSet> writeDescriptorSets =
-        {
-                // Binding 1 : Fragment shader texture sampler
-                //	Fragment shader: layout (binding = 1) uniform sampler2D samplerColor;
-                vks::initializers::writeDescriptorSet(
-                    descriptorSet,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,		// The descriptor set will use a combined image sampler (sampler and image could be split)
-                0,												// Shader binding point 1
-                &textureDescriptor)								// Pointer to the descriptor image for our texture
-        };
+			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &copyDepthDescriptorSet));
+		}
 
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+		VkDescriptorImageInfo colorAovDescriptor;
+		colorAovDescriptor.imageView = color_aov.view;
+		colorAovDescriptor.sampler = color_aov.sampler;
+		colorAovDescriptor.imageLayout = color_aov.imageLayout;
+
+		VkDescriptorImageInfo depthAovDescriptor;
+		depthAovDescriptor.imageView = depth_aov.view;
+		depthAovDescriptor.sampler = depth_aov.sampler;
+		depthAovDescriptor.imageLayout = depth_aov.imageLayout;
+
+		std::vector<VkWriteDescriptorSet> writeDescriptorSets =
+		{
+			vks::initializers::writeDescriptorSet(
+				descriptorSet,
+				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				0,
+				&colorAovDescriptor
+			),
+			vks::initializers::writeDescriptorSet(
+				copyDepthDescriptorSet,
+				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				0,
+				&depthAovDescriptor
+			)
+		};
+
+		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
     }
 
     void preparePipelines()
@@ -506,6 +619,80 @@ public:
 				0,
 				VK_FALSE);
 
+			VkPipelineRasterizationStateCreateInfo rasterizationState =
+			vks::initializers::pipelineRasterizationStateCreateInfo(
+				VK_POLYGON_MODE_FILL,
+				VK_CULL_MODE_NONE,
+				VK_FRONT_FACE_COUNTER_CLOCKWISE,
+				0);
+
+			VkPipelineColorBlendAttachmentState blendAttachmentState =
+			vks::initializers::pipelineColorBlendAttachmentState(
+				0x0,
+				VK_FALSE);
+
+			VkPipelineColorBlendStateCreateInfo colorBlendState =
+			vks::initializers::pipelineColorBlendStateCreateInfo(
+				1,
+				&blendAttachmentState);
+
+			VkPipelineDepthStencilStateCreateInfo depthStencilState =
+			vks::initializers::pipelineDepthStencilStateCreateInfo(
+				VK_TRUE,
+				VK_TRUE,
+				VK_COMPARE_OP_ALWAYS);
+
+			VkPipelineViewportStateCreateInfo viewportState =
+			vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
+
+			VkPipelineMultisampleStateCreateInfo multisampleState =
+			vks::initializers::pipelineMultisampleStateCreateInfo(
+				VK_SAMPLE_COUNT_1_BIT,
+				0);
+
+			std::vector<VkDynamicState> dynamicStateEnables = {
+				VK_DYNAMIC_STATE_VIEWPORT,
+				VK_DYNAMIC_STATE_SCISSOR
+			};
+			VkPipelineDynamicStateCreateInfo dynamicState =
+			vks::initializers::pipelineDynamicStateCreateInfo(
+				dynamicStateEnables.data(),
+				static_cast<uint32_t>(dynamicStateEnables.size()),
+				0);
+
+			// Load shaders
+			std::array<VkPipelineShaderStageCreateInfo,2> shaderStages;
+
+			shaderStages[0] = loadShader(getAssetPath() + "shaders/rpr_basic_shade/fullscreen_quad.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+			shaderStages[1] = loadShader(getAssetPath() + "shaders/rpr_basic_shade/copy_depth.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+
+			VkGraphicsPipelineCreateInfo pipelineCreateInfo =
+			vks::initializers::pipelineCreateInfo(
+				copyDepthPipelineLayout,
+				renderPass,
+				0);
+
+			pipelineCreateInfo.pVertexInputState = &vertices.inputState;
+			pipelineCreateInfo.pInputAssemblyState = &inputAssemblyState;
+			pipelineCreateInfo.pRasterizationState = &rasterizationState;
+			pipelineCreateInfo.pColorBlendState = &colorBlendState;
+			pipelineCreateInfo.pMultisampleState = &multisampleState;
+			pipelineCreateInfo.pViewportState = &viewportState;
+			pipelineCreateInfo.pDepthStencilState = &depthStencilState;
+			pipelineCreateInfo.pDynamicState = &dynamicState;
+			pipelineCreateInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+			pipelineCreateInfo.pStages = shaderStages.data();
+
+			VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipelines.copy_depth));
+		}
+
+		{
+			VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =
+			vks::initializers::pipelineInputAssemblyStateCreateInfo(
+				VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+				0,
+				VK_FALSE);
+
 			VkVertexInputAttributeDescription vertexInputAttributeDescription =
 			vks::initializers::vertexInputAttributeDescription(0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0);
 
@@ -522,9 +709,12 @@ public:
 			VkPipelineRasterizationStateCreateInfo rasterizationState =
 			vks::initializers::pipelineRasterizationStateCreateInfo(
 				VK_POLYGON_MODE_FILL,
-				VK_CULL_MODE_BACK_BIT,
+				VK_CULL_MODE_NONE,
 				VK_FRONT_FACE_COUNTER_CLOCKWISE,
 				0);
+			rasterizationState.depthBiasEnable = VK_TRUE;
+			rasterizationState.depthBiasConstantFactor = 1.0;
+			rasterizationState.depthBiasSlopeFactor = 0.1;
 
 			VkPipelineColorBlendAttachmentState blendAttachmentState =
 			vks::initializers::pipelineColorBlendAttachmentState(
@@ -538,9 +728,9 @@ public:
 
 			VkPipelineDepthStencilStateCreateInfo depthStencilState =
 			vks::initializers::pipelineDepthStencilStateCreateInfo(
+				VK_TRUE,
 				VK_FALSE,
-				VK_FALSE,
-				VK_COMPARE_OP_ALWAYS);
+				VK_COMPARE_OP_GREATER_OR_EQUAL);
 
 			VkPipelineViewportStateCreateInfo viewportState =
 			vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
@@ -568,7 +758,7 @@ public:
 
 			VkGraphicsPipelineCreateInfo pipelineCreateInfo =
 			vks::initializers::pipelineCreateInfo(
-				flat_shade_pipeline_layout_,
+				flatShadePipelineLayout,
 				renderPass,
 				0);
 
@@ -658,15 +848,25 @@ public:
 
     void initAovs()
     {
-        rpr_framebuffer_desc desc = { (rpr_uint)width, (rpr_uint)height};
-        rpr_framebuffer_format fmt = { 4, RPR_COMPONENT_TYPE_FLOAT16 };
+		{
+			rpr_framebuffer_desc desc = { (rpr_uint)width, (rpr_uint)height};
+			rpr_framebuffer_format fmt = { 4, RPR_COMPONENT_TYPE_FLOAT16 };
 
-        CHECK_RPR(rprContextCreateFrameBuffer(context_, fmt, &desc, &color_framebuffer_));
-        //Get semaphores from color aov
-        CHECK_RPR(rprContextGetInfo(context_, RPR_CONTEXT_FRAMEBUFFERS_READY_SEMAPHORES,
-             sizeof(VkSemaphore) * frames_in_flight_, framebuffer_ready_semaphores_.data(), nullptr));
+			CHECK_RPR(rprContextCreateFrameBuffer(context_, fmt, &desc, &color_framebuffer_));
+			CHECK_RPR(rprContextSetAOV(context_, RPR_AOV_COLOR, color_framebuffer_));
+		}
 
-        CHECK_RPR(rprContextSetAOV(context_, RPR_AOV_COLOR, color_framebuffer_));
+		{
+			rpr_framebuffer_desc desc = { (rpr_uint)width, (rpr_uint)height};
+			rpr_framebuffer_format fmt = { 1, RPR_COMPONENT_TYPE_FLOAT32 };
+
+			CHECK_RPR(rprContextCreateFrameBuffer(context_, fmt, &desc, &depth_framebuffer_));
+			CHECK_RPR(rprContextSetAOV(context_, RPR_AOV_DEPTH, depth_framebuffer_));
+		}
+
+		//Get semaphores from color aov
+		CHECK_RPR(rprContextGetInfo(context_, RPR_CONTEXT_FRAMEBUFFERS_READY_SEMAPHORES,
+				sizeof(VkSemaphore) * frames_in_flight_, framebuffer_ready_semaphores_.data(), nullptr));
     }
 
     void initScene()
@@ -700,12 +900,10 @@ public:
         CHECK_RPR(rprCameraSetSensorSize(camera_, sensor_size.x * 1000.0, sensor_size.y * 1000.0));
         CHECK_RPR(rprSceneSetCamera(scene_, camera_));
 
-        rpr_light env_light = nullptr;
-        CHECK_RPR(rprContextCreateEnvironmentLight(context_, &env_light));
-        rpr_image image = nullptr;
-        CHECK_RPR(rprContextCreateImageFromFile(context_, "../data/textures/hdr/studio015.hdr", &image));
-        CHECK_RPR(rprEnvironmentLightSetImage(env_light, image));
-        CHECK_RPR(rprSceneSetEnvironmentLight(scene_, env_light));
+        CHECK_RPR(rprContextCreateEnvironmentLight(context_, &env_light_.light));
+        CHECK_RPR(rprContextCreateImageFromFile(context_, "../data/textures/hdr/studio015.hdr", &env_light_.image));
+        CHECK_RPR(rprEnvironmentLightSetImage(env_light_.light, env_light_.image));
+        CHECK_RPR(rprSceneSetEnvironmentLight(scene_, env_light_.light));
 
         CHECK_RPR(rprContextSetParameterByKey1f(context_, RPR_CONTEXT_DISPLAY_GAMMA, 2.2f));
     }
@@ -884,75 +1082,101 @@ public:
 
 		CreatePlane(objects_[0], glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(10.0f, 10.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.4f, 0.4f, 0.4f));
 
-        CreateSphere(objects_[1], 16, 16, 1.7f, glm::vec3(-8.0f, 2.0f, 0.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        CreateSphere(objects_[2], 16, 16, 1.7f, glm::vec3(-4.0f, 2.0f, 0.0f), glm::vec3(0.75f, 0.25f, 0.0f));
+        CreateSphere(objects_[1], 16, 16, 1.7f, glm::vec3(-6.0f, 2.0f, 0.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        CreateSphere(objects_[2], 16, 16, 1.7f, glm::vec3(-3.0f, 2.0f, 0.0f), glm::vec3(0.75f, 0.25f, 0.0f));
     	CreateSphere(objects_[3], 16, 16, 1.7f, glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0.5f, 0.5f, 0.0f));
-		CreateSphere(objects_[4], 16, 16, 1.7f, glm::vec3(4.0f, 2.0f, 0.0f), glm::vec3(0.25f, 0.75f, 0.0f));
-		CreateSphere(objects_[5], 16, 16, 1.7f, glm::vec3(8.0f, 2.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		CreateSphere(objects_[4], 16, 16, 1.7f, glm::vec3(3.0f, 2.0f, 0.0f), glm::vec3(0.25f, 0.75f, 0.0f));
+		CreateSphere(objects_[5], 16, 16, 1.7f, glm::vec3(6.0f, 2.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 	}
 
-    VkImage getRenderedImage()
+    void setupTextures()
     {
-        VkImage image;
-        auto status = rprFrameBufferGetInfo(color_framebuffer_, RPR_VK_IMAGE_OBJECT, sizeof(VkImage), &image, 0);
+		{
+			//get VkImage from FB
+			CHECK_RPR(rprFrameBufferGetInfo(color_framebuffer_, RPR_VK_IMAGE_OBJECT, sizeof(VkImage), &color_aov.image, 0));
 
-        return status == RPR_SUCCESS ? image : nullptr;
+			// Create a texture sampler
+			// In Vulkan textures are accessed by samplers
+			// This separates all the sampling information from the texture data. This means you could have multiple sampler objects for the same texture with different settings
+			// Note: Similar to the samplers available with OpenGL 3.3
+			VkSamplerCreateInfo sampler = vks::initializers::samplerCreateInfo();
+			sampler.magFilter = VK_FILTER_NEAREST;
+			sampler.minFilter = VK_FILTER_NEAREST;
+			sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+			sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+			sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+			sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+			sampler.mipLodBias = 0.0f;
+			sampler.compareOp = VK_COMPARE_OP_NEVER;
+			sampler.minLod = 0.0f;
+			// Set max level-of-detail to mip level count of the texture
+			sampler.maxLod = 0.0f;
+			// Enable anisotropic filtering
+			// This feature is optional, so we must check if it's supported on the device
+			sampler.maxAnisotropy = 1.0;
+			sampler.anisotropyEnable = VK_FALSE;
+			sampler.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+			VK_CHECK_RESULT(vkCreateSampler(device, &sampler, nullptr, &color_aov.sampler));
+
+			// Create image view
+			// Textures are not directly accessed by the shaders and
+			// are abstracted by image views containing additional
+			// information and sub resource ranges
+			VkImageViewCreateInfo view = vks::initializers::imageViewCreateInfo();
+			view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			view.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+			view.components = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
+			// The subresource range describes the set of mip levels (and array layers) that can be accessed through this image view
+			// It's possible to create multiple image views for a single image referring to different (and/or overlapping) ranges of the image
+			view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			view.subresourceRange.baseMipLevel = 0;
+			view.subresourceRange.baseArrayLayer = 0;
+			view.subresourceRange.layerCount = 1;
+			// Linear tiling usually won't support mip maps
+			// Only set mip map count if optimal tiling is used
+			view.subresourceRange.levelCount = 1;
+			// The view will be based on the texture's image
+			view.image = color_aov.image;
+			VK_CHECK_RESULT(vkCreateImageView(device, &view, nullptr, &color_aov.view));
+
+			color_aov.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		}
+
+		{
+			CHECK_RPR(rprFrameBufferGetInfo(depth_framebuffer_, RPR_VK_IMAGE_OBJECT, sizeof(VkImage), &depth_aov.image, 0));
+
+			VkSamplerCreateInfo sampler = vks::initializers::samplerCreateInfo();
+			sampler.magFilter = VK_FILTER_NEAREST;
+			sampler.minFilter = VK_FILTER_NEAREST;
+			sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+			sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+			sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+			sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+			sampler.mipLodBias = 0.0f;
+			sampler.compareOp = VK_COMPARE_OP_NEVER;
+			sampler.minLod = 0.0f;
+			sampler.maxLod = 0.0f;
+			sampler.maxAnisotropy = 1.0;
+			sampler.anisotropyEnable = VK_FALSE;
+			sampler.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+			VK_CHECK_RESULT(vkCreateSampler(device, &sampler, nullptr, &depth_aov.sampler));
+
+			VkImageViewCreateInfo view = vks::initializers::imageViewCreateInfo();
+			view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			view.format = VK_FORMAT_R32_SFLOAT;
+			view.components = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
+			view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			view.subresourceRange.baseMipLevel = 0;
+			view.subresourceRange.baseArrayLayer = 0;
+			view.subresourceRange.layerCount = 1;
+			view.subresourceRange.levelCount = 1;
+			view.image = depth_aov.image;
+			VK_CHECK_RESULT(vkCreateImageView(device, &view, nullptr, &depth_aov.view));
+
+			depth_aov.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		}
     }
 
-    void loadTextureFromRprFb()
-    {
-        //get VkImage from FB
-        VkImage image = getRenderedImage();
-
-        // Create a texture sampler
-        // In Vulkan textures are accessed by samplers
-        // This separates all the sampling information from the texture data. This means you could have multiple sampler objects for the same texture with different settings
-        // Note: Similar to the samplers available with OpenGL 3.3
-        VkSamplerCreateInfo sampler = vks::initializers::samplerCreateInfo();
-        sampler.magFilter = VK_FILTER_NEAREST;
-        sampler.minFilter = VK_FILTER_NEAREST;
-        sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-        sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        sampler.mipLodBias = 0.0f;
-        sampler.compareOp = VK_COMPARE_OP_NEVER;
-        sampler.minLod = 0.0f;
-        // Set max level-of-detail to mip level count of the texture
-        sampler.maxLod = 0.0f;
-        // Enable anisotropic filtering
-        // This feature is optional, so we must check if it's supported on the device
-        sampler.maxAnisotropy = 1.0;
-        sampler.anisotropyEnable = VK_FALSE;
-        sampler.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-        VK_CHECK_RESULT(vkCreateSampler(device, &sampler, nullptr, &texture.sampler));
-
-        // Create image view
-        // Textures are not directly accessed by the shaders and
-        // are abstracted by image views containing additional
-        // information and sub resource ranges
-        VkImageViewCreateInfo view = vks::initializers::imageViewCreateInfo();
-        view.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        view.components = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
-        // The subresource range describes the set of mip levels (and array layers) that can be accessed through this image view
-        // It's possible to create multiple image views for a single image referring to different (and/or overlapping) ranges of the image
-        view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        view.subresourceRange.baseMipLevel = 0;
-        view.subresourceRange.baseArrayLayer = 0;
-        view.subresourceRange.layerCount = 1;
-        // Linear tiling usually won't support mip maps
-        // Only set mip map count if optimal tiling is used
-        view.subresourceRange.levelCount = 1;
-        // The view will be based on the texture's image
-        view.image = image;
-        VK_CHECK_RESULT(vkCreateImageView(device, &view, nullptr, &texture.view));
-
-        texture.image = image;
-
-        texture.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    }
     void prepare()
     {
         VulkanExampleBase::prepare();
@@ -961,8 +1185,10 @@ public:
         initAovs();
         initScene();
 
-        loadTextureFromRprFb();
+		setupDepthStencil();
+        setupTextures();
 
+		setupFrameBuffer();
         setupVertexDescriptions();
         setupDescriptorSetLayout();
         preparePipelines();

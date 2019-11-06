@@ -15,5 +15,5 @@ out gl_PerVertex
 
 void main()
 {
-    gl_Position = g_transform * vec4(inPosition, 1.0);
+	gl_Position = g_transform * vec4(inPosition, 1.0);
 }

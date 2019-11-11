@@ -64,10 +64,6 @@ public:
         std::vector<VkVertexInputAttributeDescription> attributeDescriptions;
     } vertices;
 
-    vks::Buffer vertexBuffer;
-    vks::Buffer indexBuffer;
-    uint32_t indexCount;
-
 	struct Vertex {
         glm::vec4 position;
         glm::vec4 normal;
@@ -80,17 +76,17 @@ public:
 		VkPipeline copy_depth;
         VkPipeline flat_shade;
     } pipelines;
-
-    VkPipelineLayout pipelineLayout;
-    VkDescriptorSet descriptorSet;
+	
     VkDescriptorSetLayout descriptorSetLayout;
+    VkDescriptorSetLayout flatShadeDescriptorSetLayout;
+
+    VkPipelineLayout outputPipelineLayout;
+    VkDescriptorSet outputDescriptorSet;
 
 	VkPipelineLayout copyDepthPipelineLayout;
     VkDescriptorSet copyDepthDescriptorSet;
-    VkDescriptorSetLayout copyDepthDescriptorSetLayout;
 
 	VkPipelineLayout flatShadePipelineLayout;
-    VkDescriptorSetLayout flatShadeDescriptorSetLayout;
 
     //Interop
     constexpr static std::uint32_t frames_in_flight_ = 3;
@@ -190,11 +186,10 @@ public:
 		vkDestroyPipeline(device, pipelines.copy_depth, nullptr);
 		vkDestroyPipeline(device, pipelines.flat_shade, nullptr);
 
-        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+        vkDestroyPipelineLayout(device, outputPipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
 		vkDestroyPipelineLayout(device, copyDepthPipelineLayout, nullptr);
-		vkDestroyDescriptorSetLayout(device, copyDepthDescriptorSetLayout, nullptr);
 
 		vkDestroyPipelineLayout(device, flatShadePipelineLayout, nullptr);
 		vkDestroyDescriptorSetLayout(device, flatShadeDescriptorSetLayout, nullptr);
@@ -203,9 +198,6 @@ public:
 		{
 			vkDestroySemaphore(device, framebuffer_release_semaphores_[i], nullptr);
 		}
-
-        vertexBuffer.destroy();
-        indexBuffer.destroy();
     }
 
     // Enable physical device features required for this example
@@ -280,7 +272,7 @@ public:
         VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
         vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
 
-        vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, NULL);
+        vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, outputPipelineLayout, 0, 1, &outputDescriptorSet, 0, NULL);
         vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.solid);
 
         vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
@@ -402,7 +394,7 @@ public:
         VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
     }
 
-    void setupDescriptorSetLayout()
+    void setupLayouts()
     {
 		{
 			std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings =
@@ -425,25 +417,10 @@ public:
 				&descriptorSetLayout,
 				1);
 
-			VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+			VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &outputPipelineLayout));
 		}
 
 		{
-			std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings =
-			{
-				vks::initializers::descriptorSetLayoutBinding(
-					VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-					VK_SHADER_STAGE_FRAGMENT_BIT,
-					0
-				)
-			};
-
-			VkDescriptorSetLayoutCreateInfo descriptorLayout =
-			vks::initializers::descriptorSetLayoutCreateInfo(
-				setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
-
-			VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &copyDepthDescriptorSetLayout));
-
 			VkPushConstantRange pushConstants =
 				vks::initializers::pushConstantRange(
 					VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -452,7 +429,7 @@ public:
 
 			VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
 			vks::initializers::pipelineLayoutCreateInfo(
-				&copyDepthDescriptorSetLayout,
+				&descriptorSetLayout,
 				1);
 
 			pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstants;
@@ -494,14 +471,14 @@ public:
 				&descriptorSetLayout,
 				1);
 
-			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet));
+			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &outputDescriptorSet));
 		}
 
 		{
 			VkDescriptorSetAllocateInfo allocInfo =
 			vks::initializers::descriptorSetAllocateInfo(
 				descriptorPool,
-				&copyDepthDescriptorSetLayout,
+				&descriptorSetLayout,
 				1);
 
 			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &copyDepthDescriptorSet));
@@ -520,7 +497,7 @@ public:
 		std::vector<VkWriteDescriptorSet> writeDescriptorSets =
 		{
 			vks::initializers::writeDescriptorSet(
-				descriptorSet,
+				outputDescriptorSet,
 				VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 				0,
 				&colorAovDescriptor
@@ -594,7 +571,7 @@ public:
 
 			VkGraphicsPipelineCreateInfo pipelineCreateInfo =
 			vks::initializers::pipelineCreateInfo(
-				pipelineLayout,
+				outputPipelineLayout,
 				renderPass,
 				0);
 
@@ -1190,7 +1167,7 @@ public:
 
 		setupFrameBuffer();
         setupVertexDescriptions();
-        setupDescriptorSetLayout();
+        setupLayouts();
         preparePipelines();
         setupDescriptorPool();
         setupDescriptorSet();
